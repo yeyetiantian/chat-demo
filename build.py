@@ -8,7 +8,6 @@ import os
 import sys
 import shutil
 import subprocess
-import platform
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
@@ -19,28 +18,89 @@ VENV_DIR = BACKEND_DIR / "venv"
 
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
 EXEC_SUFFIX = ".exe" if IS_WIN else ""
 EXECUTABLE = BUILD_DIR / f"DataPivot{EXEC_SUFFIX}"
-
 SEP = ";" if IS_WIN else ":"
+
+# 虚拟环境中的 python/pip 路径（跨平台）
+_VENV_PYTHON = VENV_DIR / ("Scripts" if IS_WIN else "bin") / ("python.exe" if IS_WIN else "python")
+_VENV_PIP = VENV_DIR / ("Scripts" if IS_WIN else "bin") / ("pip.exe" if IS_WIN else "pip")
+
+
+def _print_step(step: str, total: int, current: int):
+    bar = "█" * int(40 * current / total) + "░" * (40 - int(40 * current / total))
+    print(f"\r[{bar}] {step} {current}/{total}", end="", flush=True)
 
 
 def run(cmd, cwd=None):
-    """运行命令"""
+    """运行命令（强制子进程以 UTF-8 交互，避免 Windows CP1252 解码崩溃）"""
     print(f"  执行: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    sub_env = os.environ.copy()
+    sub_env["PYTHONUTF8"] = "1"
+    sub_env["PYTHONIOENCODING"] = "utf-8:surrogateescape"
+    sub_env.setdefault("LANG", "en_US.UTF-8")
+    sub_env.setdefault("LC_ALL", "en_US.UTF-8")
+    if IS_WIN:
+        sub_env.setdefault("CHCP", "65001")
+    result = subprocess.run(
+        cmd, cwd=cwd, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+        env=sub_env,
+    )
     if result.returncode != 0:
         tail = (result.stderr or "").strip() or (result.stdout or "").strip()
-        if len(tail) > 2000:
-            tail = tail[:1000] + "\n...[中间省略]...\n" + tail[-1000:]
+        if len(tail) > 4000:
+            tail = tail[:2000] + "\n...[中间省略]...\n" + tail[-2000:]
         print(f"  ❌ 失败:\n{tail}")
         return False
     return True
 
 
+# ============================================================
+# 步骤 0: 准备虚拟环境
+# ============================================================
+def ensure_venv():
+    """确保虚拟环境存在 & 安装好依赖"""
+    print("\n[0/5] 准备虚拟环境...")
+
+    if not _VENV_PYTHON.exists():
+        print(f"  ⚠️  虚拟环境不存在，正在创建...")
+        if IS_WIN:
+            if not run([sys.executable, "-m", "venv", str(VENV_DIR)]):
+                return False
+        else:
+            if not run([sys.executable, "-m", "venv", str(VENV_DIR)]):
+                return False
+        print("  ✅ 虚拟环境已创建")
+    else:
+        print(f"  ✅ 虚拟环境已存在: {_VENV_PYTHON}")
+
+    # 升级 pip
+    run([str(_VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip", "--quiet"])
+
+    # 安装后端依赖（包含 PyInstaller）
+    req_file = BACKEND_DIR / "requirements.txt"
+    if req_file.exists():
+        print("  安装后端依赖...")
+        run([str(_VENV_PIP), "install", "-r", str(req_file), "--quiet"])
+    else:
+        print("  ⚠️  requirements.txt 不存在，跳过依赖安装")
+
+    # 确保 PyInstaller 已安装
+    print("  安装 PyInstaller...")
+    run([str(_VENV_PIP), "install", "pyinstaller", "--quiet"])
+
+    print("  ✅ 虚拟环境就绪")
+    return True
+
+
+# ============================================================
+# 步骤 1: 打包前端
+# ============================================================
 def build_frontend():
     """打包前端"""
-    print("\n[1/4] 打包前端...")
+    print("\n[1/5] 打包前端...")
     npm = shutil.which("npm")
     if not npm:
         print("  ❌ 未找到 npm，请先安装 Node.js")
@@ -55,9 +115,12 @@ def build_frontend():
     return True
 
 
+# ============================================================
+# 步骤 2: 创建主程序
+# ============================================================
 def create_server_main():
     """创建主程序（FastAPI + 静态文件托管）"""
-    print("\n[2/4] 创建主程序...")
+    print("\n[2/5] 创建主程序...")
 
     main_py = BACKEND_DIR / "app" / "server_main.py"
     server_code = '''"""
@@ -144,16 +207,17 @@ app.add_middleware(SPAStaticMiddleware)
 @app.on_event("startup")
 async def startup():
     """启动时打印诊断 + 延迟打开浏览器"""
+    # 诊断（不暴露 key 内容）
     try:
         from app.config import DEEPSEEK_API_KEY as _k1
         import os as _os
         _k2 = _os.getenv("OPENAI_API_KEY", "")
         _status = "✅ 已配置 (DEEPSEEK_API_KEY)" if _k1 else (
-            "✅ 已配置 (OPENAI_API_KEY)" if _k2 else "⚠️  未配置（AI 对话功能不可用）"
+            "✅ 已配置 (OPENAI_API_KEY)" if _k2 else "\\u26a0\\ufe0f  未配置（AI 对话功能不可用）"
         )
         print(f"   AI API Key: {_status}")
         if not (_k1 or _k2):
-            print("   → 请在可执行文件同目录创建 .env 文件，例如：")
+            print("   \\u2192 请在可执行文件同目录创建 .env 文件，例如：")
             print("     DEEPSEEK_API_KEY=sk-xxx")
             print("     DEEPSEEK_BASE_URL=https://api.deepseek.com/v1")
         from app.config import DUCKDB_PATH as _dp
@@ -180,8 +244,8 @@ async def startup():
             pass
 
     threading.Thread(target=open_browser, daemon=True).start()
-    print("\\n✅ DataPivot 已启动: http://localhost:8080")
-    print(f"   资源目录: {BASE_DIR}")
+    print("\\n\\u2705 DataPivot \\u5df2\\u542f\\u52a8: http://localhost:8080")
+    print(f"   \\u8d44\\u6e90\\u76ee\\u5f55: {BASE_DIR}")
     print(f"   index.html: {INDEX_PATH}")
     print("   浏览器将在服务就绪后自动打开（最长等待60秒）。")
 
@@ -203,16 +267,15 @@ if __name__ == "__main__":
     return True
 
 
+# ============================================================
+# 步骤 3: 打包后端
+# ============================================================
 def build_executable():
     """打包后端"""
-    print("\n[3/4] 打包后端...")
+    print("\n[3/5] 打包后端...")
 
-    venv_python = VENV_DIR / "bin" / "python"
-
-    # 打包后 index.html 和 frontend/dist 会被解压到 _MEIPASS 临时目录
-    # server_main.py 中的 _base_dir() 会正确处理路径
     cmd = [
-        str(venv_python), "-m", "PyInstaller",
+        str(_VENV_PYTHON), "-m", "PyInstaller",
         "--onefile",
         "--console",
         f"--add-data{SEP}index.html{SEP}.",
@@ -232,59 +295,52 @@ def build_executable():
     return True
 
 
-def finalize():
-    """最终整理"""
-    print("\n[4/4] 最终整理...")
+# ============================================================
+# 步骤 4: 复制可执行文件
+# ============================================================
+def copy_executable():
+    """从 PyInstaller 输出目录复制可执行文件到 dist/"""
+    print("\n[4/5] 复制可执行文件...")
 
-    # 清理临时文件
-    temp_dir = BUILD_DIR / "backend_dist"
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
+    # PyInstaller 在 Windows 上输出为 DataPivot.exe，Unix 上为 DataPivot
+    # 先统一无后缀名搜索，再按平台特定后缀名
+    candidates = [
+        BUILD_DIR / "backend_dist" / f"DataPivot{EXEC_SUFFIX}",  # 平台标准后缀
+        BUILD_DIR / "backend_dist" / "DataPivot",                # 无后缀
+    ]
 
-    # 复制可执行文件到 dist 根目录
-    src_exe = BUILD_DIR / "backend_dist" / f"DataPivot{EXEC_SUFFIX}"
-    if src_exe.exists():
-        shutil.copy2(src_exe, EXECUTABLE)
-        print(f"  ✅ 可执行文件: {EXECUTABLE}")
-    else:
-        # PyInstaller 输出可能在 dist/backend_dist/DataPivot/ 也可能是其它路径
-        alt = BUILD_DIR / "backend_dist" / "DataPivot"
-        if alt.exists():
-            shutil.copy2(alt, EXECUTABLE)
-            print(f"  ✅ 可执行文件: {EXECUTABLE}")
-        else:
-            print(f"  ⚠️ 未找到可执行文件，请检查 {BUILD_DIR / 'backend_dist'}")
+    src = None
+    for c in candidates:
+        if c.exists():
+            src = c
+            break
 
-    # 创建启动脚本
-    if IS_WIN:
-        _create_win_launcher()
-    else:
-        _create_mac_launcher()
+    if src is None:
+        print(f"  ⚠️  未找到可执行文件，请检查 {BUILD_DIR / 'backend_dist'}")
+        return False
 
-    # 创建 README
-    readme_path = BUILD_DIR / "README.txt"
-    if not readme_path.exists():
-        readme_path.write_text(f"""DataPivot 打包文件
-
-使用说明:
-1. 双击 "DataPivot" (或 启动 DataPivot.bat) 启动程序
-2. 程序会自动打开浏览器访问 http://localhost:8080
-3. 关闭控制台窗口将终止程序
-
-API 文档: http://localhost:8080/docs
-""", encoding='utf-8')
-        print(f"  ✅ 文档说明: {readme_path}")
-
+    shutil.copy2(src, EXECUTABLE)
+    # Linux/macOS 确保可执行权限
+    if not IS_WIN:
+        EXECUTABLE.chmod(0o755)
+    print(f"  ✅ 可执行文件: {EXECUTABLE} ({(EXECUTABLE.stat().st_size / 1024 / 1024):.0f} MB)")
     return True
 
 
-def _create_win_launcher():
-    """Windows 启动脚本"""
-    launcher = BUILD_DIR / "启动 DataPivot.bat"
-    launcher.write_text("""@echo off
+# ============================================================
+# 步骤 5: 创建启动脚本 & 文档
+# ============================================================
+def create_launchers():
+    """创建各平台启动脚本"""
+    print("\n[5/5] 创建启动脚本...")
+
+    # Windows
+    if IS_WIN:
+        bat = BUILD_DIR / "启动 DataPivot.bat"
+        bat.write_text("""@echo off
 chcp 65001 >nul
 echo ========================================
-echo   DataPivot 启动中...
+echo   DataPivot \\u542f\\u52a8\\u4e2d...
 echo ========================================
 echo.
 start "" "DataPivot.exe"
@@ -292,18 +348,17 @@ timeout /t 3 /nobreak >nul
 start http://localhost:8080
 echo.
 echo ========================================
-echo   服务已启动
-echo   关闭此窗口将终止程序
+echo   \\u670d\\u52a1\\u5df2\\u542f\\u52a8
+echo   \\u5173\\u95ed\\u6b64\\u7a97\\u53e3\\u5c06\\u7ec8\\u6b62\\u7a0b\\u5e8f
 echo ========================================
 pause
 """, encoding='utf-8')
-    print(f"  ✅ Windows 启动脚本: {launcher}")
+        print(f"  ✅ Windows 启动脚本: {bat}")
 
-
-def _create_mac_launcher():
-    """macOS 启动脚本"""
-    launcher = BUILD_DIR / "启动 DataPivot.command"
-    launcher.write_text("""#!/bin/bash
+    # macOS
+    if IS_MAC:
+        cmd = BUILD_DIR / "启动 DataPivot.command"
+        cmd.write_text("""#!/bin/bash
 cd "$(dirname "$0")"
 echo "========================================"
 echo "  DataPivot 启动中..."
@@ -320,8 +375,72 @@ echo "  服务已启动"
 echo "  关闭 terminal 窗口将终止程序"
 echo "========================================"
 """, encoding='utf-8')
-    os.chmod(launcher, 0o755)
-    print(f"  ✅ macOS 启动脚本: {launcher}")
+        cmd.chmod(0o755)
+        print(f"  ✅ macOS 启动脚本: {cmd}")
+
+    # Linux
+    if IS_LINUX:
+        sh = BUILD_DIR / "启动 DataPivot.sh"
+        sh.write_text("""#!/bin/bash
+cd "$(dirname "$0")"
+echo "========================================"
+echo "  DataPivot 启动中..."
+echo "========================================"
+echo ""
+echo "[1/2] 启动后端服务..."
+"./DataPivot" &
+sleep 3
+echo "[2/2] 打开浏览器..."
+xdg-open http://localhost:8080
+echo ""
+echo "========================================"
+echo "  服务已启动"
+echo "  关闭 terminal 窗口将终止程序"
+echo "========================================"
+""", encoding='utf-8')
+        sh.chmod(0o755)
+        print(f"  ✅ Linux 启动脚本: {sh}")
+
+    # README
+    readme = BUILD_DIR / "README.txt"
+    if not readme.exists():
+        readme.write_text(f"""DataPivot 打包文件
+
+使用说明:
+1. 启动程序：双击对应平台的启动脚本
+   - Windows: 双击 "启动 DataPivot.bat"
+   - macOS: 双击 "启动 DataPivot.command"（首次可能需要 chmod +x）
+   - Linux: 运行 "启动 DataPivot.sh"
+2. 也可直接运行 DataPivot{EXEC_SUFFIX}
+3. 程序会自动打开浏览器访问 http://localhost:8080
+4. 关闭控制台窗口将终止程序
+
+API 文档: http://localhost:8080/docs
+""", encoding='utf-8')
+        print(f"  ✅ 文档说明: {readme}")
+
+    return True
+
+
+def cleanup():
+    """清理 PyInstaller 临时文件"""
+    print("\n清理临时文件...")
+    temp_dir = BUILD_DIR / "backend_dist"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+        print(f"  ✅ 已清理: {temp_dir}")
+
+    # PyInstaller 在项目根目录生成 .spec 文件，清理
+    spec_file = BACKEND_DIR / "server_main.spec"
+    if spec_file.exists():
+        spec_file.unlink()
+        print(f"  ✅ 已清理: {spec_file}")
+
+    # __pycache__
+    build_dir = BACKEND_DIR / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+        print(f"  ✅ 已清理: {build_dir}")
 
 
 def main():
@@ -330,31 +449,33 @@ def main():
     print("DataPivot 打包脚本")
     print("=" * 60)
     print(f"  平台: {sys.platform}")
+    print(f"  Python: {sys.version.split()[0]}")
     print(f"  输出: {EXECUTABLE}")
 
-    # 检查虚拟环境
-    if not (VENV_DIR / "bin" / "python").exists():
-        print(f"\n❌ 虚拟环境不存在: {VENV_DIR / 'bin' / 'python'}")
-        print("   请先创建: cd backend && python3 -m venv venv")
-        sys.exit(1)
-
-    # 执行打包步骤
     steps = [
+        ("准备虚拟环境", ensure_venv),
         ("打包前端", build_frontend),
         ("创建主程序", create_server_main),
         ("打包后端", build_executable),
-        ("最终整理", finalize),
+        ("复制可执行文件", copy_executable),
+        ("创建启动脚本 & 文档", create_launchers),
     ]
 
-    for name, func in steps:
-        print(f"\n--- {name} ---")
+    total = len(steps)
+    for i, (name, func) in enumerate(steps, 1):
+        print(f"\n[{i}/{total}] {name}")
         if not func():
             print(f"\n❌ 打包失败: {name}")
             sys.exit(1)
 
+    cleanup()
+
     print("\n" + "=" * 60)
     print("✅ 打包完成！")
     print("=" * 60)
+    print(f"\n  🎯 可执行文件: {EXECUTABLE}")
+    print(f"  📦 大小: {(EXECUTABLE.stat().st_size / 1024 / 1024):.0f} MB")
+    print()
 
 
 if __name__ == "__main__":
