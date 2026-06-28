@@ -1,8 +1,10 @@
 name: Build & Release DataPivot
 
-# 触发方式：
-#   1. 手动点击 Actions → Run workflow (最常用)
+# 触发方式（全部支持，任意满足一个就会跑）：
+#   1. 手动点击 Actions → Run workflow (最常用，随时可点)
 #   2. 打 tag 如 v1.0.0 或 v2.0.1-beta 时，自动构建 + 上传 GitHub Release
+#   3. push 到 main/master 分支，且改动涉及「前后端代码/依赖/数据库/构建脚本」时自动跑（README 等改动不触发，省 runner 时间）
+#   4. PR 到 main/master 时自动跑（防止合入前就打包失败）
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +15,33 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+      - master
+    paths:
+      - 'build.py'
+      - 'backend/**'
+      - 'frontend/src/**'
+      - 'frontend/package*.json'
+      - 'frontend/vite.config.*'
+      - 'frontend/tsconfig*.json'
+      - 'frontend/index.html'
+      - 'vcloud_duck.db'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'build.py'
+      - 'backend/**'
+      - 'frontend/src/**'
+      - 'frontend/package*.json'
+      - 'frontend/vite.config.*'
+      - 'frontend/tsconfig*.json'
+      - 'frontend/index.html'
+      - 'vcloud_duck.db'
+      - '.github/workflows/build.yml'
 
 # 全部任务失败不影响其他平台继续
 concurrency:
