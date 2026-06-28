@@ -5,9 +5,13 @@
 
 import subprocess
 import time
-import requests
 import sys
+import os
 from pathlib import Path
+
+IS_WIN = sys.platform.startswith("win")
+EXEC_SUFFIX = ".exe" if IS_WIN else ""
+
 
 def test_program():
     """测试打包后的程序是否正常启动"""
@@ -15,12 +19,20 @@ def test_program():
     print("测试 DataPivot 打包后的程序")
     print("=" * 60)
 
-    executable = Path(__file__).parent / "dist" / "DataPivot.exe"
-
+    # 跨平台可执行文件查找
+    build_dir = Path(__file__).parent / "dist"
+    executable = build_dir / f"DataPivot{EXEC_SUFFIX}"
     if not executable.exists():
-        print(f"\n❌ 可执行文件不存在: {executable}")
-        print("请先运行打包脚本: python build.py")
-        return False
+        # 也可能是没有扩展名的文件（Mac/Linux 但 build.py 输出 .exe）
+        alt = build_dir / "DataPivot"
+        if alt.exists() and os.access(str(alt), os.X_OK):
+            executable = alt
+        elif IS_WIN and (build_dir / "DataPivot.exe").exists():
+            executable = build_dir / "DataPivot.exe"
+        else:
+            print(f"\n❌ 可执行文件不存在: {executable}")
+            print("请先运行打包脚本: python build.py")
+            return False
 
     print(f"\n✅ 找到可执行文件: {executable}")
 
@@ -47,26 +59,30 @@ def test_program():
 
     print("  ✅ 程序已启动")
 
-    # 测试 API
+    # 测试 API（用 urllib 替代 requests，减少外部依赖）
     print("\n[2/3] 测试 API...")
     try:
-        response = requests.get("http://localhost:8080", timeout=5)
-        if response.status_code == 200:
+        import urllib.request
+        import urllib.error
+        req = urllib.request.Request("http://localhost:8080/")
+        response = urllib.request.urlopen(req, timeout=5)
+        if response.status == 200:
             print("  ✅ API 响应正常")
         else:
-            print(f"  ❌ API 响应状态码: {response.status_code}")
-    except requests.exceptions.ConnectionError:
-        print("  ❌ 无法连接到 API")
-        return False
+            print(f"  ❌ API 响应状态码: {response.status}")
+            return False
     except Exception as e:
-        print(f"  ❌ 测试失败: {e}")
+        print(f"  ❌ 无法连接到 API: {e}")
         return False
 
     # 测试静态文件
     print("\n[3/3] 测试静态文件...")
     try:
-        response = requests.get("http://localhost:8080/index.html", timeout=5)
-        if response.status_code == 200 and "DataPivot" in response.text:
+        import urllib.request
+        req = urllib.request.Request("http://localhost:8080/index.html")
+        response = urllib.request.urlopen(req, timeout=5)
+        body = response.read().decode("utf-8", errors="replace")
+        if response.status == 200 and "DataPivot" in body:
             print("  ✅ 静态文件正常")
         else:
             print(f"  ❌ 静态文件响应异常")
