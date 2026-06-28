@@ -48,6 +48,16 @@ concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# 全局环境变量：
+#   PYTHONUTF8=1           → Python 3.7+：强制 stdin/stdout/stderr 以 UTF-8 打开
+#                           （避免 Windows runner 默认 CP1252 时 print 中文直接崩）
+#   PYTHONIOENCODING=utf-8 → 兼容旧 Python / 子进程读取
+#   PYTHONUNBUFFERED=1     → 不缓冲输出，log 实时
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: 'utf-8:surrogateescape'
+  PYTHONUNBUFFERED: '1'
+
 jobs:
   build:
     name: Build ${{ matrix.label }}

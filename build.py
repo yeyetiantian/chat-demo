@@ -11,6 +11,51 @@ import subprocess
 import platform
 from pathlib import Path
 
+
+def _force_utf8_stdio() -> None:
+    """强制 stdout / stderr 使用 UTF-8（避免 Windows CP1252/GBK 等打印中文时崩溃）。"""
+    try:
+        if sys.platform.startswith("win"):
+            try:
+                from ctypes import windll, byref, wintypes, WinError, POINTER
+                _ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+                _STD_OUTPUT_HANDLE = -11
+                _STD_ERROR_HANDLE = -12
+                try:
+                    for _h in (_STD_OUTPUT_HANDLE, _STD_ERROR_HANDLE):
+                        _handle = windll.kernel32.GetStdHandle(_h)
+                        if _handle in (None, 0, -1):
+                            continue
+                        _mode = wintypes.DWORD(0)
+                        if windll.kernel32.GetConsoleMode(_handle, byref(_mode)):
+                            _new_mode = wintypes.DWORD(_mode.value | _ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+                            windll.kernel32.SetConsoleMode(_handle, _new_mode)
+                        windll.kernel32.SetConsoleCP(65001)
+                        windll.kernel32.SetConsoleOutputCP(65001)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        for _stream_name in ("stdout", "stderr"):
+            _stream = getattr(sys, _stream_name, None)
+            if _stream is None:
+                continue
+            try:
+                reconfigure_fn = getattr(_stream, "reconfigure", None)
+                if callable(reconfigure_fn):
+                    try:
+                        reconfigure_fn(encoding="utf-8", errors="surrogateescape", newline=None)
+                    except (AttributeError, io.UnsupportedOperation, ValueError, TypeError):
+                        pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+_force_utf8_stdio()
+import io  # noqa: E402
+
 _pyi_cache_default = Path.home() / ".cache" / "pyinstaller"
 _pyi_cache_candidates = [
     Path(os.getenv("PYINSTALLER_CONFIG_DIR", "")) if os.getenv("PYINSTALLER_CONFIG_DIR") else None,
@@ -42,11 +87,32 @@ SEP = os.pathsep
 
 
 def run(cmd, cwd=None, shell=False):
-    """运行命令"""
+    """运行命令（强制 subprocess 子进程以 UTF-8 交互，避免 Windows CP1252 解码崩溃）"""
     print(f"  执行: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, shell=shell)
+    sub_env = os.environ.copy()
+    sub_env["PYTHONUTF8"] = "1"
+    sub_env["PYTHONIOENCODING"] = "utf-8:surrogateescape"
+    sub_env.setdefault("LANG", "en_US.UTF-8")
+    sub_env.setdefault("LC_ALL", "en_US.UTF-8")
+    if sys.platform.startswith("win"):
+        sub_env.setdefault("CHCP", "65001")
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        shell=shell,
+        encoding="utf-8",
+        errors="replace",
+        env=sub_env,
+    )
     if result.returncode != 0:
-        print(f"  ❌ 失败: {result.stderr or result.stdout}")
+        tail_out = (result.stdout or "").strip()
+        tail_err = (result.stderr or "").strip()
+        output = tail_err or tail_out
+        if len(output) > 4000:
+            output = output[:2000] + "\n...[中间省略]...\n" + output[-2000:]
+        print(f"  ❌ 失败:\n{output}")
         return False
     return True
 
