@@ -1,0 +1,12 @@
+datapivot:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../../vcloud_duck.db
+      schema: main
+      threads: 1
+      # dbt-duckdb 扩展配置
+      settings:
+        Threads: 1
+        enable_external_access: false

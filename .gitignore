@@ -1,0 +1,56 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ===== Virtual environments =====
+backend/venv/
+backend/.venv/
+venv/
+.venv/
+env/
+
+# ===== PyInstaller / build =====
+build/
+*.spec
+.pyinstaller_cache/
+dist/
+*.manifest
+.pyi_temp/
+
+# ===== Node / Frontend =====
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ===== Local env (包含 API keys，不要提交！) =====
+.env
+.env.local
+backend/.env
+backend/app/.env
+
+# ===== Logs / traces =====
+*.log
+backend/logs/
+backend/dbt_project/logs/
+
+# ===== Database (可选：如果不想把 db 提交到 git，可取消下一行注释) =====
+# vcloud_duck.db
+# backend/vcloud_duck.db
+
+# ===== History folders (IDE 自动生成的备份) =====
+.history/
+.claude/

@@ -1,0 +1,14 @@
+name: datapivot
+version: "1.0"
+profile: datapivot
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+models:
+  datapivot:
+    +materialized: view

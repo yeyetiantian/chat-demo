@@ -1,0 +1,237 @@
+name: Build & Release DataPivot
+
+# 触发方式：
+#   1. 手动点击 Actions → Run workflow (最常用)
+#   2. 打 tag 如 v1.0.0 或 v2.0.1-beta 时，自动构建 + 上传 GitHub Release
+on:
+  workflow_dispatch:
+    inputs:
+      release_flag:
+        description: '同时创建/更新 GitHub Draft Release (可选)'
+        required: false
+        default: 'false'
+  push:
+    tags:
+      - 'v*'
+
+# 全部任务失败不影响其他平台继续
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+            artifact_suffix: Windows-x64
+            exe_suffix: .exe
+          - os: macos-13
+            label: macos-x64
+            artifact_suffix: macOS-x64
+            exe_suffix: ""
+          - os: macos-14
+            label: macos-arm64
+            artifact_suffix: macOS-arm64
+            exe_suffix: ""
+          - os: ubuntu-latest
+            label: linux-x64
+            artifact_suffix: Linux-x64
+            exe_suffix: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          # 如果 vcloud_duck.db 用 Git LFS 管理则打开下面一行，否则不用
+          # lfs: true
+
+      # ------------------------------------------------------------------
+      # 环境准备
+      # ------------------------------------------------------------------
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ------------------------------------------------------------------
+      # 校验数据库存在（必须要，否则打包的 exe 无数据）
+      # ------------------------------------------------------------------
+      - name: Check database file
+        shell: bash
+        run: |
+          if [ ! -f "vcloud_duck.db" ]; then
+            echo "❌ 仓库根目录缺少 vcloud_duck.db（2.8MB），打包产物将没有数据。"
+            echo "   请在本地执行：git add -f vcloud_duck.db && git commit -m 'add database' && git push"
+            echo "   或改用 Git LFS（文件大于 50MB 推荐）。"
+            exit 1
+          fi
+          echo "✅ vcloud_duck.db 存在 ($(du -h vcloud_duck.db | awk '{print $1}'))"
+
+      # ------------------------------------------------------------------
+      # 注入 API Key 到 backend/app/.env（会被 bake 进 exe，用户可被同目录 .env 覆盖）
+      #   若仓库 Secrets 未设置也允许构建，只是 AI 功能默认不可用。
+      # ------------------------------------------------------------------
+      - name: Prepare baked-in .env (API Key)
+        shell: bash
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        run: |
+          mkdir -p backend/app
+          ENV_FILE=backend/app/.env
+          rm -f "$ENV_FILE"
+          touch "$ENV_FILE"
+
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY" >> "$ENV_FILE"
+            if [ -n "$DEEPSEEK_BASE_URL" ]; then
+              echo "DEEPSEEK_BASE_URL=$DEEPSEEK_BASE_URL" >> "$ENV_FILE"
+            fi
+            echo "✅ 已注入 DEEPSEEK_API_KEY (将内置到可执行文件)"
+          elif [ -n "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$ENV_FILE"
+            if [ -n "$OPENAI_BASE_URL" ]; then
+              echo "OPENAI_BASE_URL=$OPENAI_BASE_URL" >> "$ENV_FILE"
+            fi
+            echo "✅ 已注入 OPENAI_API_KEY (将内置到可执行文件)"
+          else
+            echo "⚠️  未配置 Secrets.DEEPSEEK_API_KEY / OPENAI_API_KEY"
+            echo "   打包出的 exe 将不带内置 API Key；用户仍可在可执行文件同目录放 .env 启用 AI 功能。"
+          fi
+          echo "-- env 文件行数: $(wc -l < $ENV_FILE) --"
+
+      # ------------------------------------------------------------------
+      # 安装前端依赖 + 预构建（可被 build.py 复用，失败也可继续由 build.py 重试）
+      # ------------------------------------------------------------------
+      - name: Install frontend dependencies
+        working-directory: frontend
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # ------------------------------------------------------------------
+      # 构建（build.py 会自动建 venv + 装依赖 + 前后端打包）
+      # ------------------------------------------------------------------
+      - name: Run build.py
+        shell: bash
+        env:
+          # 避免 Python 交互式缓冲，log 更清晰
+          PYTHONUNBUFFERED: "1"
+          # 给 PyInstaller 指定可写缓存目录
+          PYINSTALLER_CONFIG_DIR: ${{ runner.temp }}/pyi_config
+        run: |
+          mkdir -p "$PYINSTALLER_CONFIG_DIR" || true
+          python3 build.py
+
+      # ------------------------------------------------------------------
+      # 校验产物：可执行文件 + 启动脚本必须存在
+      # ------------------------------------------------------------------
+      - name: Validate artifacts
+        shell: bash
+        run: |
+          EXEC="dist/DataPivot${{ matrix.exe_suffix }}"
+          if [ ! -f "$EXEC" ]; then
+            echo "❌ 打包产物不存在: $EXEC"
+            ls -la dist/ 2>/dev/null || true
+            exit 1
+          fi
+          echo "✅ 可执行文件: $EXEC ($(du -h "$EXEC" | awk '{print $1}'))"
+          echo
+          echo "dist 目录列表:"
+          ls -la dist/
+
+      # ------------------------------------------------------------------
+      # 上传到 Actions Artifacts（可在 Actions 页面下载，保留 90 天）
+      # ------------------------------------------------------------------
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DataPivot-${{ matrix.artifact_suffix }}
+          path: |
+            dist/*
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+
+      # ------------------------------------------------------------------
+      # 打包成单文件 (tar.gz / zip)，用于 Release Asset
+      # ------------------------------------------------------------------
+      - name: Package for release asset
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_flag == 'true'
+        shell: bash
+        run: |
+          OUT_DIR="${{ runner.temp }}/release_assets"
+          mkdir -p "$OUT_DIR"
+          NAME="DataPivot-${{ matrix.artifact_suffix }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ASSET="$OUT_DIR/$NAME.zip"
+            # Windows 上用 PowerShell Compress-Archive
+            powershell -NoProfile -Command \
+              "Compress-Archive -Path dist\\* -DestinationPath '$ASSET' -Force"
+          else
+            ASSET="$OUT_DIR/$NAME.tar.gz"
+            tar -C dist -czf "$ASSET" .
+          fi
+          ls -lh "$OUT_DIR"
+          echo "ASSET_PATH=$ASSET" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=$(basename "$ASSET")" >> "$GITHUB_ENV"
+
+      - name: Upload release asset to draft release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_flag == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('DataPivot {0}', github.ref_name) || 'DataPivot Snapshot (draft)' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'snapshot' }}
+          files: ${{ env.ASSET_PATH }}
+          draft: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            ## DataPivot ${{ github.ref_name }}
+
+            全平台打包产物（3 系统 4 架构）：
+            | 平台/架构 | 文件 |
+            |---|---|
+            | Windows x64 | `DataPivot-Windows-x64.zip` |
+            | macOS x64 (Intel) | `DataPivot-macOS-x64.tar.gz` |
+            | macOS arm64 (Apple Silicon) | `DataPivot-macOS-arm64.tar.gz` |
+            | Linux x64 | `DataPivot-Linux-x64.tar.gz` |
+
+            ### 使用方法
+            1. 解压后双击：
+               - Windows：`启动 DataPivot.bat`
+               - macOS/Linux：`启动 DataPivot.sh`（首次可能需要：`chmod +x *.sh && xattr -d com.apple.quarantine DataPivot 2>/dev/null || true`）
+            2. 或直接运行 `DataPivot(.exe)`
+            3. 浏览器会自动打开 http://localhost:8080
+
+            ### 自定义 API Key（可选）
+            可执行文件同目录创建 `.env` 文件即可覆盖内置 Key：
+            ```
+            DEEPSEEK_API_KEY=sk-xxx
+            DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
