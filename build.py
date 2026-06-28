@@ -39,20 +39,23 @@ def run(cmd, cwd=None):
     sub_env = os.environ.copy()
     sub_env["PYTHONUTF8"] = "1"
     sub_env["PYTHONIOENCODING"] = "utf-8:surrogateescape"
-    sub_env.setdefault("LANG", "en_US.UTF-8")
-    sub_env.setdefault("LC_ALL", "en_US.UTF-8")
-    if IS_WIN:
-        sub_env.setdefault("CHCP", "65001")
-    result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
-        env=sub_env,
-    )
+    # Windows：CHCP 是 cmd.exe 命令，不是环境变量，这里不设
+    try:
+        result = subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            env=sub_env,
+        )
+    except Exception as e:
+        print(f"  ❌ 子进程启动失败: {e}")
+        return False
     if result.returncode != 0:
-        tail = (result.stderr or "").strip() or (result.stdout or "").strip()
-        if len(tail) > 4000:
-            tail = tail[:2000] + "\n...[中间省略]...\n" + tail[-2000:]
-        print(f"  ❌ 失败:\n{tail}")
+        tail_out = (result.stdout or "").strip()
+        tail_err = (result.stderr or "").strip()
+        output = tail_err or tail_out or "(无输出，exit={result.returncode})"
+        if len(output) > 4000:
+            output = output[:2000] + "\n...[中间省略]...\n" + output[-2000:]
+        print(f"  ❌ 失败 (exit={result.returncode}):\n{output}")
         return False
     return True
 
@@ -83,13 +86,13 @@ def ensure_venv():
     req_file = BACKEND_DIR / "requirements.txt"
     if req_file.exists():
         print("  安装后端依赖...")
-        run([str(_VENV_PIP), "install", "-r", str(req_file), "--quiet"])
+        run([str(_VENV_PYTHON), "-m", "pip", "install", "-r", str(req_file), "--quiet"])
     else:
         print("  ⚠️  requirements.txt 不存在，跳过依赖安装")
 
     # 确保 PyInstaller 已安装
     print("  安装 PyInstaller...")
-    run([str(_VENV_PIP), "install", "pyinstaller", "--quiet"])
+    run([str(_VENV_PYTHON), "-m", "pip", "install", "pyinstaller", "--quiet"])
 
     print("  ✅ 虚拟环境就绪")
     return True
