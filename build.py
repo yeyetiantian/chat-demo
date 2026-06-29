@@ -281,7 +281,6 @@ def build_executable():
         str(_VENV_PYTHON), "-m", "PyInstaller",
         "--onefile",
         "--console",
-        "--add-data", f"index.html{SEP}.",
         "--add-data", f"frontend/dist{SEP}frontend/dist",
         "--add-data", f"vcloud_duck.db{SEP}.",
         "--exclude-module", "tkinter",
@@ -289,10 +288,10 @@ def build_executable():
         "--exclude-module", "numpy",
         "--noupx",
         "--distpath", str(BUILD_DIR / "backend_dist"),
-        "app/server_main.py"
+        f"backend/app/server_main.py"
     ]
 
-    if not run(cmd, cwd=BACKEND_DIR):
+    if not run(cmd, cwd=PROJECT_ROOT):
         return False
     print("  ✅ 后端打包成功")
     return True
