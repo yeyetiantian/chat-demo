@@ -283,7 +283,7 @@ def build_executable():
         "--console",
         "--name", "DataPivot",
         "--add-data", f"frontend/dist{SEP}frontend/dist",
-        "--add-data", f"vcloud_duck.db{SEP}.",
+        # vcloud_duck.db 不内置到 exe，放同目录让用户可替换
         # hidden imports: Chat Demo (databao) 是动态导入，PyInstaller 检测不到
         "--hidden-import", "databao",
         "--hidden-import", "databao.agent",
@@ -349,6 +349,15 @@ def copy_executable():
     if not IS_WIN:
         EXECUTABLE.chmod(0o755)
     print(f"  ✅ 可执行文件: {EXECUTABLE} ({(EXECUTABLE.stat().st_size / 1024 / 1024):.0f} MB)")
+
+    # 复制默认数据库到 dist/（不打包进 exe，放同目录让用户可替换）
+    db_src = PROJECT_ROOT / "vcloud_duck.db"
+    if db_src.exists():
+        db_dst = BUILD_DIR / "vcloud_duck.db"
+        shutil.copy2(db_src, db_dst)
+        print(f"  ✅ 默认数据库: {db_dst} ({(db_dst.stat().st_size / 1024 / 1024):.0f} MB)")
+    else:
+        print(f"  ⚠️  未找到默认数据库 {db_src}，启动后需用户自备")
     return True
 
 
