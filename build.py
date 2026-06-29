@@ -288,7 +288,7 @@ def build_executable():
         "--exclude-module", "matplotlib",
         "--exclude-module", "numpy",
         "--noupx",
-        "-D", str(BUILD_DIR / "backend_dist"),
+        "--distpath", str(BUILD_DIR / "backend_dist"),
         "app/server_main.py"
     ]
 
