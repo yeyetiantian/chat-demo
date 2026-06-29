@@ -88,11 +88,11 @@ async def startup():
         import os as _os
         _k2 = _os.getenv("OPENAI_API_KEY", "")
         _status = "✅ 已配置 (DEEPSEEK_API_KEY)" if _k1 else (
-            "✅ 已配置 (OPENAI_API_KEY)" if _k2 else "⚠️  未配置（AI 对话功能不可用）"
+            "✅ 已配置 (OPENAI_API_KEY)" if _k2 else "\u26a0\ufe0f  未配置（AI 对话功能不可用）"
         )
         print(f"   AI API Key: {_status}")
         if not (_k1 or _k2):
-            print("   → 请在可执行文件同目录创建 .env 文件，例如：")
+            print("   \u2192 请在可执行文件同目录创建 .env 文件，例如：")
             print("     DEEPSEEK_API_KEY=sk-xxx")
             print("     DEEPSEEK_BASE_URL=https://api.deepseek.com/v1")
         from app.config import DUCKDB_PATH as _dp
@@ -119,8 +119,8 @@ async def startup():
             pass
 
     threading.Thread(target=open_browser, daemon=True).start()
-    print("\n✅ DataPivot 已启动: http://localhost:8080")
-    print(f"   资源目录: {BASE_DIR}")
+    print("\n\u2705 DataPivot \u5df2\u542f\u52a8: http://localhost:8080")
+    print(f"   \u8d44\u6e90\u76ee\u5f55: {BASE_DIR}")
     print(f"   index.html: {INDEX_PATH}")
     print("   浏览器将在服务就绪后自动打开（最长等待60秒）。")
 

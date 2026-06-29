@@ -285,7 +285,7 @@ def build_executable():
         str(_VENV_PYTHON), "-m", "PyInstaller",
         "--onefile",
         "--console",
-        "--name", "DataPivot",
+        "--name", "ChatDemo",
         "--add-data", f"frontend/dist{SEP}frontend/dist",
         # vcloud_duck.db 不内置到 exe，放同目录让用户可替换
         # hidden imports: databao 精确导入（只导入当前用到的模块，避免收集到有问题的子包）
@@ -337,33 +337,14 @@ def build_executable():
         "--hidden-import", "langchain_core.language_models.chat_models",
         "--hidden-import", "langchain_core.tools",
         "--hidden-import", "langgraph",
-        # 标准库：防止 PyInstaller 的 import 链在加载时找不到模块
-        "--hidden-import", "os",
-        "--hidden-import", "os.path",
-        "--hidden-import", "importlib",
-        "--hidden-import", "importlib.metadata",
+        # databao 内部有文件遗漏了标准库 import（PyInstaller 隔离更严格会暴露）
         "--hidden-import", "re",
         "--hidden-import", "uuid",
-        "--hidden-import", "json",
-        "--hidden-import", "datetime",
-        "--hidden-import", "collections",
-        "--hidden-import", "functools",
-        "--hidden-import", "shutil",
-        "--hidden-import", "pathlib",
-        "--hidden-import", "queue",
-        "--hidden-import", "io",
         "--exclude-module", "tkinter",
         "--noupx",
         "--distpath", str(BUILD_DIR / "backend_dist"),
         f"backend/app/server_main.py"
     ]
-
-    # 内嵌 .env（仅在 CI 中存在，由 workflow 从 Secrets 写入，不会进 git）
-    # 用户拿到 exe 后可在同目录放自己的 .env 覆盖内置值
-    env_file = BACKEND_DIR / "app" / ".env"
-    if env_file.exists():
-        cmd.extend(["--add-data", f"{env_file}{SEP}app/.env"])
-        print("  📄 已内嵌 .env（API Key 来自 CI Secrets）")
 
     if not run(cmd, cwd=PROJECT_ROOT):
         return False
@@ -409,101 +390,49 @@ def copy_executable():
         print(f"  ✅ 默认数据库: {db_dst} ({(db_dst.stat().st_size / 1024 / 1024):.0f} MB)")
     else:
         print(f"  ⚠️  未找到默认数据库 {db_src}，启动后需用户自备")
+
+    # 复制 .env 到 dist/（放同目录，用户可编辑；不打包进 exe）
+    for env_candidate in [BACKEND_DIR / "app" / ".env", PROJECT_ROOT / ".env"]:
+        if env_candidate.exists():
+            env_dst = BUILD_DIR / ".env"
+            shutil.copy2(env_candidate, env_dst)
+            print(f"  ✅ 已复制 .env: {env_dst}")
+            break
     return True
 
 
 # ============================================================
-# 步骤 5: 创建启动脚本 & 文档
+# 步骤 5: 生成使用说明
 # ============================================================
-def create_launchers():
-    """创建各平台启动脚本"""
-    print("\n[5/5] 创建启动脚本...")
+def create_readme():
+    """生成 README 使用说明"""
+    print("\n[5/5] 生成使用说明...")
 
-    # Windows
-    if IS_WIN:
-        bat = BUILD_DIR / "启动 DataPivot.bat"
-        bat.write_text("""@echo off
-chcp 65001 >nul
-echo ========================================
-echo   DataPivot \\u542f\\u52a8\\u4e2d...
-echo ========================================
-echo.
-start "" "DataPivot.exe"
-timeout /t 3 /nobreak >nul
-start http://localhost:8080
-echo.
-echo ========================================
-echo   \\u670d\\u52a1\\u5df2\\u542f\\u52a8
-echo   \\u5173\\u95ed\\u6b64\\u7a97\\u53e3\\u5c06\\u7ec8\\u6b62\\u7a0b\\u5e8f
-echo ========================================
-pause
-""", encoding='utf-8')
-        print(f"  ✅ Windows 启动脚本: {bat}")
-
-    # macOS
-    if IS_MAC:
-        cmd = BUILD_DIR / "启动 DataPivot.command"
-        cmd.write_text("""#!/bin/bash
-cd "$(dirname "$0")"
-echo "========================================"
-echo "  DataPivot 启动中..."
-echo "========================================"
-echo ""
-echo "[1/2] 启动后端服务..."
-"./DataPivot" &
-sleep 3
-echo "[2/2] 打开浏览器..."
-open http://localhost:8080
-echo ""
-echo "========================================"
-echo "  服务已启动"
-echo "  关闭 terminal 窗口将终止程序"
-echo "========================================"
-""", encoding='utf-8')
-        cmd.chmod(0o755)
-        print(f"  ✅ macOS 启动脚本: {cmd}")
-
-    # Linux
-    if IS_LINUX:
-        sh = BUILD_DIR / "启动 DataPivot.sh"
-        sh.write_text("""#!/bin/bash
-cd "$(dirname "$0")"
-echo "========================================"
-echo "  DataPivot 启动中..."
-echo "========================================"
-echo ""
-echo "[1/2] 启动后端服务..."
-"./DataPivot" &
-sleep 3
-echo "[2/2] 打开浏览器..."
-xdg-open http://localhost:8080
-echo ""
-echo "========================================"
-echo "  服务已启动"
-echo "  关闭 terminal 窗口将终止程序"
-echo "========================================"
-""", encoding='utf-8')
-        sh.chmod(0o755)
-        print(f"  ✅ Linux 启动脚本: {sh}")
-
-    # README
     readme = BUILD_DIR / "README.txt"
-    if not readme.exists():
-        readme.write_text(f"""DataPivot 打包文件
+    readme.write_text(f"""DataPivot v2.0 — 数据透视分析系统
 
 使用说明:
-1. 启动程序：双击对应平台的启动脚本
-   - Windows: 双击 "启动 DataPivot.bat"
-   - macOS: 双击 "启动 DataPivot.command"（首次可能需要 chmod +x）
-   - Linux: 运行 "启动 DataPivot.sh"
-2. 也可直接运行 DataPivot{EXEC_SUFFIX}
-3. 程序会自动打开浏览器访问 http://localhost:8080
-4. 关闭控制台窗口将终止程序
+  双击 DataPivot{EXEC_SUFFIX} 即可启动
+  浏览器会自动打开 http://localhost:8080
+  关闭控制台窗口即终止程序
 
-API 文档: http://localhost:8080/docs
+功能页面:
+  /chat       — AI 对话式报表
+  /pivot      — 拖拽数据透视
+  /dashboard  — Chat Demo 联动仪表盘
+  /trace      — 链路追踪
+  /docs       — API 文档
+
+自定义 API Key（可选）:
+  在 DataPivot{EXEC_SUFFIX} 同目录创建 .env 文件:
+    DEEPSEEK_API_KEY=sk-xxx
+    DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+
+数据库:
+  DataPivot{EXEC_SUFFIX} 同目录的 vcloud_duck.db 为默认数据库
+  放自己的 .db 文件即可替换
 """, encoding='utf-8')
-        print(f"  ✅ 文档说明: {readme}")
-
+    print(f"  ✅ 使用说明: {readme}")
     return True
 
 
@@ -543,7 +472,7 @@ def main():
         ("创建主程序", create_server_main),
         ("打包后端", build_executable),
         ("复制可执行文件", copy_executable),
-        ("创建启动脚本 & 文档", create_launchers),
+        ("生成使用说明", create_readme),
     ]
 
     total = len(steps)

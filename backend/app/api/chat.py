@@ -13,6 +13,7 @@ AI 对话 API — Chat Demo 全链路驱动
   (完整 prompt messages + 原始响应) 与工具调用 (SQL 执行等) 的过程。
 """
 import sys
+import os
 import json
 import time
 import asyncio
@@ -116,7 +117,9 @@ def _get_agent():
         from ..config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
 
         if not DEEPSEEK_API_KEY and not os.getenv("OPENAI_API_KEY"):
-            logger.warning("⚠️  未配置 DEEPSEEK_API_KEY / OPENAI_API_KEY，AI 对话功能不可用")
+            msg = f"未配置任何 API Key，AI 对话功能不可用\n{_NO_KEY_MSG}"
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         # LLM 配置 — 使用 DeepSeek (OpenAI 兼容协议)
         model_name = "deepseek-chat" if DEEPSEEK_API_KEY else "gpt-4o-mini"

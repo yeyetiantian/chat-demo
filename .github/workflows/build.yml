@@ -9,39 +9,39 @@ on:
   workflow_dispatch:
     inputs:
       release_flag:
-        description: '同时创建/更新 GitHub Draft Release (可选)'
+        description: "同时创建/更新 GitHub Draft Release (可选)"
         required: false
-        default: 'false'
+        default: "false"
   push:
     tags:
-      - 'v*'
+      - "v*"
     branches:
       - main
       - master
     paths:
-      - 'build.py'
-      - 'backend/**'
-      - 'frontend/src/**'
-      - 'frontend/package*.json'
-      - 'frontend/vite.config.*'
-      - 'frontend/tsconfig*.json'
-      - 'frontend/index.html'
-      - 'vcloud_duck.db'
-      - '.github/workflows/build.yml'
+      - "build.py"
+      - "backend/**"
+      - "frontend/src/**"
+      - "frontend/package*.json"
+      - "frontend/vite.config.*"
+      - "frontend/tsconfig*.json"
+      - "frontend/index.html"
+      - "vcloud_duck.db"
+      - ".github/workflows/build.yml"
   pull_request:
     branches:
       - main
       - master
     paths:
-      - 'build.py'
-      - 'backend/**'
-      - 'frontend/src/**'
-      - 'frontend/package*.json'
-      - 'frontend/vite.config.*'
-      - 'frontend/tsconfig*.json'
-      - 'frontend/index.html'
-      - 'vcloud_duck.db'
-      - '.github/workflows/build.yml'
+      - "build.py"
+      - "backend/**"
+      - "frontend/src/**"
+      - "frontend/package*.json"
+      - "frontend/vite.config.*"
+      - "frontend/tsconfig*.json"
+      - "frontend/index.html"
+      - "vcloud_duck.db"
+      - ".github/workflows/build.yml"
 
 # 全部任务失败不影响其他平台继续
 concurrency:
@@ -54,9 +54,9 @@ concurrency:
 #   PYTHONIOENCODING=utf-8 → 兼容旧 Python / 子进程读取
 #   PYTHONUNBUFFERED=1     → 不缓冲输出，log 实时
 env:
-  PYTHONUTF8: '1'
-  PYTHONIOENCODING: 'utf-8:surrogateescape'
-  PYTHONUNBUFFERED: '1'
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8:surrogateescape"
+  PYTHONUNBUFFERED: "1"
 
 jobs:
   build:
@@ -97,15 +97,15 @@ jobs:
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
           cache-dependency-path: backend/requirements.txt
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
       # ------------------------------------------------------------------
@@ -260,11 +260,15 @@ jobs:
             | Linux x64 | `DataPivot-Linux-x64.tar.gz` |
 
             ### 使用方法
-            1. 解压后双击：
-               - Windows：`启动 DataPivot.bat`
-               - macOS/Linux：`启动 DataPivot.sh`（首次可能需要：`chmod +x *.sh && xattr -d com.apple.quarantine DataPivot 2>/dev/null || true`）
-            2. 或直接运行 `DataPivot(.exe)`
-            3. 浏览器会自动打开 http://localhost:8080
+            1. 解压后双击 `DataPivot`（Windows 为 `DataPivot.exe`）
+            2. 浏览器会自动打开 http://localhost:8080
+            3. 关闭控制台窗口即终止程序
+
+            macOS 首次运行可能需要解除隔离：
+            ```
+            chmod +x DataPivot
+            xattr -d com.apple.quarantine DataPivot 2>/dev/null
+            ```
 
             ### 自定义 API Key（可选）
             可执行文件同目录创建 `.env` 文件即可覆盖内置 Key：
