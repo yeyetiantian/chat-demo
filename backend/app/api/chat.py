@@ -697,7 +697,7 @@ async def chat_stream(request: ChatQueryRequest):
             logger.info("✅ SSE完成 (%.0fms) | session=%s", elapsed_ms, session_id or "new")
 
         except Exception as e:
-            logger.error("❌ SSE失败: %s", str(e))
+            logger.exception("❌ SSE失败")
             yield _sse_event("error", {"message": str(e)})
             yield _sse_event("done", {"message": "❌ 处理失败"})
 
