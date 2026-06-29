@@ -333,7 +333,7 @@ class DuckDBService:
         """获取所有信号名称（带缓存）"""
         if self._signal_names is None:
             rows = self.conn.execute(
-                "SELECT DISTINCT SIGNAL_NAME FROM TL_RMU_PS_TASK_RULE_RESULT_SIGNAL ORDER BY SIGNAL_NAME"
+                "SELECT DISTINCT SIGNAL_NAME FROM TL_RMU_PS_TASK_RULE_RESULT_SIGNAL WHERE SIGNAL_NAME IS NOT NULL ORDER BY SIGNAL_NAME"
             ).fetchall()
             self._signal_names = [r[0] for r in rows]
         return self._signal_names

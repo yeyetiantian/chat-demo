@@ -39,7 +39,7 @@
             @dblclick="store.addValueField(f.column_name)"
             :title="f.column_name"
           >
-            {{ f.column_name.length > 22 ? f.column_name.substring(0,22)+'...' : f.column_name }}
+            {{ f.column_name ? (f.column_name.length > 22 ? f.column_name.substring(0,22)+'...' : f.column_name) : '(空)' }}
           </div>
         </div>
         <div class="field-count">
@@ -185,7 +185,7 @@ const filteredDynamicFields = computed(() => {
   if (!signalSearch.value) return store.dynamicFields
   const q = signalSearch.value.toLowerCase()
   return store.dynamicFields.filter((f: any) =>
-    f.column_name.toLowerCase().includes(q)
+    f.column_name && f.column_name.toLowerCase().includes(q)
   )
 })
 
