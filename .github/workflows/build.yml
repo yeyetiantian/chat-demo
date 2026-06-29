@@ -1,4 +1,4 @@
-name: Build & Release DataPivot
+name: Build & Release ChatDemo
 
 # 触发方式（全部支持，任意满足一个就会跑）：
 #   1. 手动点击 Actions → Run workflow (最常用，随时可点)
@@ -190,7 +190,7 @@ jobs:
       - name: Validate artifacts
         shell: bash
         run: |
-          EXEC="dist/DataPivot${{ matrix.exe_suffix }}"
+          EXEC="dist/ChatDemo${{ matrix.exe_suffix }}"
           if [ ! -f "$EXEC" ]; then
             echo "❌ 打包产物不存在: $EXEC"
             ls -la dist/ 2>/dev/null || true
@@ -207,7 +207,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DataPivot-${{ matrix.artifact_suffix }}
+          name: ChatDemo-${{ matrix.artifact_suffix }}
           path: |
             dist/*
           if-no-files-found: error
@@ -223,7 +223,7 @@ jobs:
         run: |
           OUT_DIR="${{ runner.temp }}/release_assets"
           mkdir -p "$OUT_DIR"
-          NAME="DataPivot-${{ matrix.artifact_suffix }}"
+          NAME="ChatDemo-${{ matrix.artifact_suffix }}"
           if [ "${{ runner.os }}" = "Windows" ]; then
             ASSET="$OUT_DIR/$NAME.zip"
             # Windows 上用 PowerShell Compress-Archive
@@ -241,7 +241,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_flag == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('DataPivot {0}', github.ref_name) || 'DataPivot Snapshot (draft)' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('ChatDemo {0}', github.ref_name) || 'ChatDemo Snapshot (draft)' }}
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'snapshot' }}
           files: ${{ env.ASSET_PATH }}
           draft: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -249,25 +249,25 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            ## DataPivot ${{ github.ref_name }}
+            ## ChatDemo ${{ github.ref_name }}
 
             全平台打包产物（3 系统 4 架构）：
             | 平台/架构 | 文件 |
             |---|---|
-            | Windows x64 | `DataPivot-Windows-x64.zip` |
-            | macOS x64 (Intel) | `DataPivot-macOS-x64.tar.gz` |
-            | macOS arm64 (Apple Silicon) | `DataPivot-macOS-arm64.tar.gz` |
-            | Linux x64 | `DataPivot-Linux-x64.tar.gz` |
+            | Windows x64 | `ChatDemo-Windows-x64.zip` |
+            | macOS x64 (Intel) | `ChatDemo-macOS-x64.tar.gz` |
+            | macOS arm64 (Apple Silicon) | `ChatDemo-macOS-arm64.tar.gz` |
+            | Linux x64 | `ChatDemo-Linux-x64.tar.gz` |
 
             ### 使用方法
-            1. 解压后双击 `DataPivot`（Windows 为 `DataPivot.exe`）
+            1. 解压后双击 `ChatDemo`（Windows 为 `ChatDemo.exe`）
             2. 浏览器会自动打开 http://localhost:8080
             3. 关闭控制台窗口即终止程序
 
             macOS 首次运行可能需要解除隔离：
             ```
-            chmod +x DataPivot
-            xattr -d com.apple.quarantine DataPivot 2>/dev/null
+            chmod +x ChatDemo
+            xattr -d com.apple.quarantine ChatDemo 2>/dev/null
             ```
 
             ### 自定义 API Key（可选）
