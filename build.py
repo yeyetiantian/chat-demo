@@ -94,6 +94,10 @@ def ensure_venv():
     print("  安装 PyInstaller...")
     run([str(_VENV_PYTHON), "-m", "pip", "install", "pyinstaller", "--quiet"])
 
+    # 安装 databao-agent（Chat Demo 底层依赖，必须预先安装好才能被 PyInstaller 收集）
+    print("  安装 databao-agent...")
+    run([str(_VENV_PYTHON), "-m", "pip", "install", "databao-agent", "--only-binary", "cryptography", "--quiet"])
+
     print("  ✅ 虚拟环境就绪")
     return True
 
@@ -284,22 +288,14 @@ def build_executable():
         "--name", "DataPivot",
         "--add-data", f"frontend/dist{SEP}frontend/dist",
         # vcloud_duck.db 不内置到 exe，放同目录让用户可替换
-        # hidden imports: Chat Demo (databao) 是动态导入，PyInstaller 检测不到
-        "--hidden-import", "databao",
-        "--hidden-import", "databao.agent",
-        "--hidden-import", "databao.agent.configs.agent",
-        "--hidden-import", "databao.subagents.shared.introspection.introspectors.duckdb",
-        "--hidden-import", "databao.subagents.shared.introspection.introspectors.duckdb.duckdb_introspector",
-        "--hidden-import", "databao.subagents.shared.introspection.introspectors.duckdb.connection_config",
-        "--hidden-import", "databao.subagents.shared.introspection.introspectors.databases_types",
-        "--hidden-import", "databao.subagents.shared.plotting",
-        "--hidden-import", "databao.subagents.shared.toolbox",
-        "--hidden-import", "databao.subagents.toolbox",
+        # hidden imports: databao 包是动态导入，用 collect-submodules 全量收集
+        "--collect-submodules", "databao",
+        "--collect-all", "databao",
+        # 必备：databao 依赖的 LLM/Agent 框架
         "--hidden-import", "langchain_openai",
         "--hidden-import", "langchain_community",
         "--hidden-import", "langchain_core",
         "--hidden-import", "langgraph",
-        "--collect-all", "databao",
         "--exclude-module", "tkinter",
         "--exclude-module", "matplotlib",
         "--noupx",
