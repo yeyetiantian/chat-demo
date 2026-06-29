@@ -281,6 +281,7 @@ def build_executable():
         str(_VENV_PYTHON), "-m", "PyInstaller",
         "--onefile",
         "--console",
+        "--name", "DataPivot",
         "--add-data", f"frontend/dist{SEP}frontend/dist",
         "--add-data", f"vcloud_duck.db{SEP}.",
         "--exclude-module", "tkinter",
