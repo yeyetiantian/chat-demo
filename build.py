@@ -281,6 +281,14 @@ def build_executable():
     """打包后端"""
     print("\n[3/5] 打包后端...")
 
+    # 清理缓存的 spec 文件，防止命名冲突
+    for spec in Path.cwd().glob("*.spec"):
+        spec.unlink()
+        print(f"  🧹 清理旧 spec: {spec}")
+    for spec in BACKEND_DIR.glob("*.spec"):
+        spec.unlink()
+        print(f"  🧹 清理旧 spec: {spec}")
+
     cmd = [
         str(_VENV_PYTHON), "-m", "PyInstaller",
         "--onefile",
