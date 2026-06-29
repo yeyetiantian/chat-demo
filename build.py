@@ -286,11 +286,17 @@ def build_executable():
         "--add-data", f"vcloud_duck.db{SEP}.",
         "--exclude-module", "tkinter",
         "--exclude-module", "matplotlib",
-        "--exclude-module", "numpy",
         "--noupx",
         "--distpath", str(BUILD_DIR / "backend_dist"),
         f"backend/app/server_main.py"
     ]
+
+    # 内嵌 .env（仅在 CI 中存在，由 workflow 从 Secrets 写入，不会进 git）
+    # 用户拿到 exe 后可在同目录放自己的 .env 覆盖内置值
+    env_file = BACKEND_DIR / "app" / ".env"
+    if env_file.exists():
+        cmd.extend(["--add-data", f"{env_file}{SEP}app/.env"])
+        print("  📄 已内嵌 .env（API Key 来自 CI Secrets）")
 
     if not run(cmd, cwd=PROJECT_ROOT):
         return False
