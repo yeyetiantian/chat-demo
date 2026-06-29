@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DataPivot 打包脚本
+ChatDemo 打包脚本
 将前后端打包成单个可执行文件
 """
 
@@ -20,7 +20,7 @@ IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 EXEC_SUFFIX = ".exe" if IS_WIN else ""
-EXECUTABLE = BUILD_DIR / f"DataPivot{EXEC_SUFFIX}"
+EXECUTABLE = BUILD_DIR / f"ChatDemo{EXEC_SUFFIX}"
 SEP = ";" if IS_WIN else ":"
 
 # 虚拟环境中的 python/pip 路径（跨平台）
@@ -131,7 +131,7 @@ def create_server_main():
 
     main_py = BACKEND_DIR / "app" / "server_main.py"
     server_code = '''"""
-DataPivot 主程序 - 集成 FastAPI + 静态文件托管
+ChatDemo 主程序 - 集成 FastAPI + 静态文件托管
 """
 
 import os
@@ -160,7 +160,7 @@ if FRONTEND_DIST.exists():
     if ALT_INDEX.exists() and not INDEX_PATH.exists():
         INDEX_PATH = ALT_INDEX
 
-app = FastAPI(title="DataPivot", version="2.0.0")
+app = FastAPI(title="ChatDemo", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -251,7 +251,7 @@ async def startup():
             pass
 
     threading.Thread(target=open_browser, daemon=True).start()
-    print("\\n\\u2705 DataPivot \\u5df2\\u542f\\u52a8: http://localhost:8080")
+    print("\\n\\u2705 ChatDemo \\u5df2\\u542f\\u52a8: http://localhost:8080")
     print(f"   \\u8d44\\u6e90\\u76ee\\u5f55: {BASE_DIR}")
     print(f"   index.html: {INDEX_PATH}")
     print("   浏览器将在服务就绪后自动打开（最长等待60秒）。")
@@ -367,11 +367,11 @@ def copy_executable():
     """从 PyInstaller 输出目录复制可执行文件到 dist/"""
     print("\n[4/5] 复制可执行文件...")
 
-    # PyInstaller 在 Windows 上输出为 DataPivot.exe，Unix 上为 DataPivot
+    # PyInstaller 在 Windows 上输出为 ChatDemo.exe，Unix 上为 ChatDemo
     # 先统一无后缀名搜索，再按平台特定后缀名
     candidates = [
-        BUILD_DIR / "backend_dist" / f"DataPivot{EXEC_SUFFIX}",  # 平台标准后缀
-        BUILD_DIR / "backend_dist" / "DataPivot",                # 无后缀
+        BUILD_DIR / "backend_dist" / f"ChatDemo{EXEC_SUFFIX}",  # 平台标准后缀
+        BUILD_DIR / "backend_dist" / "ChatDemo",                # 无后缀
     ]
 
     src = None
@@ -417,10 +417,10 @@ def create_readme():
     print("\n[5/5] 生成使用说明...")
 
     readme = BUILD_DIR / "README.txt"
-    readme.write_text(f"""DataPivot v2.0 — 数据透视分析系统
+    readme.write_text(f"""ChatDemo v2.0 — 数据透视分析系统
 
 使用说明:
-  双击 DataPivot{EXEC_SUFFIX} 即可启动
+  双击 ChatDemo{EXEC_SUFFIX} 即可启动
   浏览器会自动打开 http://localhost:8080
   关闭控制台窗口即终止程序
 
@@ -432,12 +432,12 @@ def create_readme():
   /docs       — API 文档
 
 自定义 API Key（可选）:
-  在 DataPivot{EXEC_SUFFIX} 同目录创建 .env 文件:
+  在 ChatDemo{EXEC_SUFFIX} 同目录创建 .env 文件:
     DEEPSEEK_API_KEY=sk-xxx
     DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 数据库:
-  DataPivot{EXEC_SUFFIX} 同目录的 vcloud_duck.db 为默认数据库
+  ChatDemo{EXEC_SUFFIX} 同目录的 vcloud_duck.db 为默认数据库
   放自己的 .db 文件即可替换
 """, encoding='utf-8')
     print(f"  ✅ 使用说明: {readme}")
@@ -468,7 +468,7 @@ def cleanup():
 def main():
     """主函数"""
     print("\n" + "=" * 60)
-    print("DataPivot 打包脚本")
+    print("ChatDemo 打包脚本")
     print("=" * 60)
     print(f"  平台: {sys.platform}")
     print(f"  Python: {sys.version.split()[0]}")

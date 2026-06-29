@@ -1,5 +1,5 @@
 """
-DataPivot 主程序 - 集成 FastAPI + 静态文件托管
+ChatDemo 主程序 - 集成 FastAPI + 静态文件托管
 """
 
 import os
@@ -28,7 +28,7 @@ if FRONTEND_DIST.exists():
     if ALT_INDEX.exists() and not INDEX_PATH.exists():
         INDEX_PATH = ALT_INDEX
 
-app = FastAPI(title="DataPivot", version="2.0.0")
+app = FastAPI(title="ChatDemo", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -119,7 +119,7 @@ async def startup():
             pass
 
     threading.Thread(target=open_browser, daemon=True).start()
-    print("\n\u2705 DataPivot \u5df2\u542f\u52a8: http://localhost:8080")
+    print("\n\u2705 ChatDemo \u5df2\u542f\u52a8: http://localhost:8080")
     print(f"   \u8d44\u6e90\u76ee\u5f55: {BASE_DIR}")
     print(f"   index.html: {INDEX_PATH}")
     print("   浏览器将在服务就绪后自动打开（最长等待60秒）。")
