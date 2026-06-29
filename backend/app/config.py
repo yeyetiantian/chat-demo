@@ -76,14 +76,23 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 # 数据库配置
 # ============================================================
 def _resolve_duckdb_path() -> str:
+    # 1. 环境变量显式指定
     env_path = os.getenv("DUCKDB_PATH")
     if env_path and Path(env_path).exists():
         return str(Path(env_path).resolve())
+
     if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-        candidate = base / "vcloud_duck.db"
-        if candidate.exists():
-            return str(candidate.resolve())
+        # 2. 优先使用 exe 同目录的外部数据库（用户可替换）
+        external = Path(sys.executable).parent / "vcloud_duck.db"
+        if external.exists():
+            return str(external.resolve())
+        # 3. 内置默认数据库（PyInstaller 烘焙进去的）
+        builtin = Path(getattr(sys, "_MEIPASS", "")) / "vcloud_duck.db"
+        if builtin.exists():
+            return str(builtin.resolve())
+        # 仍然尝试 exe 目录
+        return str(external.resolve())
+    # 开发模式
     src_path = Path(__file__).parent.parent.parent / "vcloud_duck.db"
     if src_path.exists():
         return str(src_path.resolve())

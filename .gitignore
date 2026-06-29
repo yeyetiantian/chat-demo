@@ -54,3 +54,5 @@ backend/dbt_project/logs/
 # ===== History folders (IDE 自动生成的备份) =====
 .history/
 .claude/
+
+vcloud_duck 2.db
