@@ -2,7 +2,7 @@ import time
 import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from .api import pivot_router, chart_router, chat_router, chatdemo_router, trace_router
+from .api import pivot_router, chart_router, chat_router, chatdemo_router, trace_router, chart_config_router
 from .utils.logger import setup_logging, get_logger
 
 # 初始化日志（如果 run.py 没调用则这里兜底）
@@ -51,6 +51,7 @@ app.include_router(chart_router)
 app.include_router(chat_router)
 app.include_router(chatdemo_router)
 app.include_router(trace_router)
+app.include_router(chart_config_router)
 
 
 @app.get("/")

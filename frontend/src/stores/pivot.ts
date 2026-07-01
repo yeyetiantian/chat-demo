@@ -81,7 +81,11 @@ export const usePivotStore = defineStore('pivot', () => {
         await recommendChart()
       }
     } catch (e: any) {
-      error.value = e.message
+      // API 查询失败（如 AI 生成的字段名数据库不存在）
+      // 如果已有数据则保留，不覆盖
+      if (!chartData.value) {
+        error.value = e.message
+      }
     } finally {
       isLoading.value = false
     }
@@ -117,7 +121,10 @@ export const usePivotStore = defineStore('pivot', () => {
   }
   function setChartType(type: string) {
     currentChartType.value = type
-    loadChartData(type)
+    // 已有数据（如 AI 保存的）则只换渲染方式，不重新查库
+    if (!chartData.value?.rows && !chartData.value?.data) {
+      loadChartData(type)
+    }
   }
   function reset() {
     rowFields.value = []

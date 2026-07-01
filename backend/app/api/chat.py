@@ -20,6 +20,8 @@ import asyncio
 import queue
 import io
 import uuid
+import httpx
+import requests
 import pandas as pd
 from typing import Dict
 from fastapi import APIRouter, HTTPException
@@ -27,6 +29,7 @@ from fastapi.responses import StreamingResponse
 from ..models.schema import ChatQueryRequest, ChatQueryResponse, ChartType
 from ..utils.logger import get_logger
 from ..services.trace_service import install_tracing, start_trace, end_trace
+from ..services.chat_history_service import append_message, get_thread, list_sessions, delete_thread
 
 # ---------------------------------------------------------------------------
 # Snowflake mock — Chat Demo 导入 snowflake.connector 但我们只用 DuckDB
@@ -45,6 +48,84 @@ logger = get_logger("api.chat")
 
 # 模块加载时安装 trace monkey-patch（幂等，仅安装一次）
 install_tracing()
+
+# ---------------------------------------------------------------------------
+# 私有 LLM 适配（OAuth2 token + 自定义 access_token 请求头）
+# ---------------------------------------------------------------------------
+_PRIVATE_LLM_TOKEN = None
+_PRIVATE_LLM_TOKEN_EXPIRES = 0.0
+
+
+def _refresh_private_llm_token() -> str:
+    """获取/刷新私有 LLM 的 OAuth2 token"""
+    global _PRIVATE_LLM_TOKEN, _PRIVATE_LLM_TOKEN_EXPIRES
+    import time as _time
+    from ..config import PRIVATE_LLM_TOKEN_URL, PRIVATE_LLM_CLIENT_ID, PRIVATE_LLM_CLIENT_SECRET
+
+    if _time.time() < _PRIVATE_LLM_TOKEN_EXPIRES and _PRIVATE_LLM_TOKEN:
+        return _PRIVATE_LLM_TOKEN
+
+    # 获取新 token
+    resp = requests.post(
+        PRIVATE_LLM_TOKEN_URL,
+        data={
+            "scope": "ALL",
+            "grant_type": "client_credentials",
+            "client_id": PRIVATE_LLM_CLIENT_ID,
+            "client_secret": PRIVATE_LLM_CLIENT_SECRET,
+        },
+        headers={"content-type": "application/x-www-form-urlencoded"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    _PRIVATE_LLM_TOKEN = data.get("access_token")
+    expires_in = data.get("expires_in", 3600)
+    _PRIVATE_LLM_TOKEN_EXPIRES = _time.time() + expires_in - 60  # 提前 60 秒刷新
+    logger.info("🔑 私有 LLM token 已刷新，有效期 %ds", expires_in)
+    return _PRIVATE_LLM_TOKEN
+
+
+def _patch_chatopenai_for_private_llm():
+    """通过 monkey-patch ChatOpenAI 注入自定义 http_client，支持 access_token 请求头"""
+    from ..config import PRIVATE_LLM_CLIENT_ID, LLM_PROVIDER
+    if LLM_PROVIDER != "private":
+        return
+
+    import httpx
+    from langchain_openai import ChatOpenAI
+
+    original_init = ChatOpenAI.__init__
+
+    def _patched_init(self, *args, **kwargs):
+        # 创建自定义 httpx client，每次请求自动带上 access_token
+        custom_client = httpx.Client(
+            auth=_PrivateLLMAuth(),
+            headers={
+                "apiTag": "V1",
+                "clientRequestId": "01",
+                "client_id": PRIVATE_LLM_CLIENT_ID,
+            },
+            timeout=httpx.Timeout(120.0, connect=15.0),
+        )
+        kwargs["http_client"] = custom_client
+        return original_init(self, *args, **kwargs)
+
+    ChatOpenAI.__init__ = _patched_init
+    logger.info("🔌 私有 LLM http_client 已注入")
+
+
+class _PrivateLLMAuth(httpx.Auth):
+    """httpx Auth handler：在每次请求前自动注入 access_token"""
+
+    def auth_flow(self, request: httpx.Request):
+        token = _refresh_private_llm_token()
+        request.headers["access_token"] = token
+        yield request
+
+
+# 模块加载时执行 patch
+_patch_chatopenai_for_private_llm()
 
 # ---------------------------------------------------------------------------
 # 流式 Writer — 捕获 Chat Demo 内部实时日志，推送给 SSE
@@ -114,31 +195,53 @@ def _get_agent():
     global _agent
     if _agent is None:
         import databao.agent as bao
-        from ..config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
+        from ..config import (
+            LLM_PROVIDER,
+            DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL,
+            PRIVATE_LLM_MODEL, PRIVATE_LLM_API_URL,
+        )
 
-        if not DEEPSEEK_API_KEY and not os.getenv("OPENAI_API_KEY"):
+        # 判断使用哪个 LLM
+        use_private = LLM_PROVIDER == "private"
+        use_deepseek = LLM_PROVIDER == "deepseek" and bool(DEEPSEEK_API_KEY)
+        use_openai = LLM_PROVIDER == "openai" and bool(os.getenv("OPENAI_API_KEY"))
+
+        if not use_private and not use_deepseek and not use_openai:
+            if DEEPSEEK_API_KEY:
+                use_deepseek = True
+            elif os.getenv("OPENAI_API_KEY"):
+                use_openai = True
+
+        if not use_private and not use_deepseek and not use_openai:
             msg = f"未配置任何 API Key，AI 对话功能不可用\n{_NO_KEY_MSG}"
             logger.error(msg)
             raise RuntimeError(msg)
 
-        # LLM 配置 — 使用 DeepSeek (OpenAI 兼容协议)
-        model_name = "deepseek-chat" if DEEPSEEK_API_KEY else "gpt-4o-mini"
-        llm_kwargs = {
-            "name": model_name,
-            "temperature": 0.1,
-        }
-        # DeepSeek 需要指定 api_base_url + 关闭 Responses API
-        if DEEPSEEK_API_KEY:
-            llm_kwargs["api_base_url"] = DEEPSEEK_BASE_URL
-            llm_kwargs["use_responses_api"] = False  # DeepSeek 只支持 /chat/completions
+        # LLM 配置
+        if use_private:
+            model_name = PRIVATE_LLM_MODEL
+            llm_kwargs = {
+                "name": model_name,
+                "temperature": 0.1,
+                "api_base_url": PRIVATE_LLM_API_URL,
+                "use_responses_api": False,
+            }
+            logger.info("🤖 使用私有 LLM | model=%s | base_url=%s", model_name, PRIVATE_LLM_API_URL)
+        elif use_deepseek:
+            model_name = "deepseek-chat"
+            llm_kwargs = {"name": model_name, "temperature": 0.1, "api_base_url": DEEPSEEK_BASE_URL, "use_responses_api": False}
+            logger.info("🤖 使用 DeepSeek | model=%s | base_url=%s", model_name, DEEPSEEK_BASE_URL)
+        else:
+            model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            llm_kwargs = {"name": model_name, "temperature": 0.1}
+            logger.info("🤖 使用 OpenAI | model=%s", model_name)
+
         try:
             llm_config = bao.LLMConfig(**llm_kwargs)
         except Exception as e:
             msg = f"LLMConfig 初始化失败（API Key 缺失或不合法）: {e}\n{_NO_KEY_MSG}"
             logger.error(msg)
             raise RuntimeError(msg) from e
-        logger.info("🤖 Chat Demo LLMConfig | model=%s | base_url=%s",
-                    model_name, DEEPSEEK_BASE_URL if DEEPSEEK_API_KEY else "(default)")
 
         # 数据域 — 绑定 DuckDB
         domain = bao.domain()
@@ -230,35 +333,6 @@ def _dataframe_to_response(df: pd.DataFrame) -> dict:
         "columns": list(df.columns),
         "rows": rows,
     }
-
-
-def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """清洗 DataFrame：将嵌套的 list/ndarray 列展开为多行，确保 plot 可用"""
-    import numpy as np
-
-    # 检查是否有包含数组的列
-    array_cols = []
-    for col in df.columns:
-        if df[col].dtype == 'object' and len(df) > 0:
-            sample = df[col].iloc[0]
-            if isinstance(sample, (list, np.ndarray)):
-                array_cols.append(col)
-
-    if not array_cols:
-        return df
-
-    # 如果有数组列，尝试 explode
-    try:
-        # 先将 ndarray 转为 list
-        for col in array_cols:
-            df = df.copy()
-            df[col] = df[col].apply(lambda x: x.tolist() if isinstance(x, np.ndarray) else x)
-        # explode 第一个数组列
-        return df.explode(array_cols[0], ignore_index=True)
-    except Exception:
-        pass
-    return df
-
 
 # ---------------------------------------------------------------------------
 # POST /api/chat/query
@@ -354,9 +428,10 @@ async def chat_query(request: ChatQueryRequest):
             success=True,
             chart_type=chart_type,
             config={
-                "dimensions": [c for c in df.columns if df[c].dtype == 'object'],
-                "measures": [c for c in df.columns if df[c].dtype in ('float64', 'int64')],
-                "aggregation": "auto",
+                "rowFields": [c for c in df.columns if df[c].dtype == 'object'],
+                "columnFields": [],
+                "valueFields": [c for c in df.columns if df[c].dtype in ('float64', 'int64')],
+                "aggregations": ["count"],
                 "session_id": session_id,
             },
             sql="-- 由 Chat Demo agent 自动生成",
@@ -429,17 +504,42 @@ def _fix_timedelta_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: str) -> list:
-    """基于当前对话上下文，生成 3 个后续追问建议"""
+def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: str) -> dict:
+    """基于当前对话上下文，生成 3 个后续追问建议 + 字段映射"""
+    result = {"questions": [], "rowFields": [], "columnFields": [], "valueFields": [], "aggregations": []}
     try:
-        cols = ", ".join(df.columns[:6])
+        cols_list = list(df.columns[:8])
+        type_hints = []
+        for c in cols_list:
+            dtype = str(df[c].dtype)
+            label = "文本" if "object" in dtype else ("数值" if "int" in dtype or "float" in dtype else dtype)
+            type_hints.append(f"{c}({label})")
+        types_str = "; ".join(type_hints)
+
         thread.ask(
-            f"用户刚才问了：「{query}」。你的回答摘要：{answer[:300]}。"
-            f"当前数据表包含字段：{cols}。"
-            f"请生成3个用户可能感兴趣的相关数据统计问题，要求简洁、可直接输入查询。"
-            f"只输出3行，每行以' - '开头，不要其他内容。"
+            f"用户刚才问了：「{query}」。你的回答摘要：{answer[:200]}。"
+            f"当前数据字段及类型：{types_str}。"
+            f"\n\n请完成：\n"
+            f"1. 生成 3 个用户可能感兴趣的相关追问，每行以' - '开头。\n"
+            f"2. 在最后输出一个 JSON 对象，包含字段映射信息。\n"
+            f"\nJSON 格式：\n"
+            f"```json\n"
+            f"{{\n"
+            f'  "rowFields": ["文本维度字段1", "文本维度字段2"],\n'
+            f'  "columnFields": [],\n'
+            f'  "valueFields": ["数据库中的数值字段名"],\n'
+            f'  "aggregations": ["count"]\n'
+            f"}}\n"
+            f"```\n"
+            f"要求：\n"
+            f"- rowFields 是文本分类字段（维度），如车型、规则名称等\n"
+            f"- valueFields 是数据库中的原始数值字段名，不是计算出来的别名\n"
+            f"- 如果「报警数量」是 COUNT 某个字段的结果，valueFields 填那个原始字段名\n"
+            f"- aggregations 只能是 count、sum、avg、min、max 中的一个\n"
         )
         text = thread.text()
+
+        # 解析追问
         questions = []
         for line in text.split("\n"):
             stripped = line.strip()
@@ -447,10 +547,36 @@ def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: s
                 q = stripped.lstrip("- ").strip()
                 if q and len(q) < 60:
                     questions.append(q)
-        return questions[:3] if len(questions) >= 2 else []
+        result["questions"] = questions[:3] if len(questions) >= 2 else []
+
+        # 解析 JSON 字段映射
+        import re as _re
+        import json as _json
+        json_match = _re.search(r'```json\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            try:
+                parsed = _json.loads(json_match.group(1))
+                result["rowFields"] = parsed.get("rowFields", [])
+                result["columnFields"] = parsed.get("columnFields", [])
+                result["valueFields"] = parsed.get("valueFields", [])
+                result["aggregations"] = parsed.get("aggregations", ["count"])
+            except Exception:
+                pass
+
+        # 兜底：用 DataFrame 类型推断
+        if not result["valueFields"]:
+            result["rowFields"] = [c for c in df.columns if df[c].dtype == 'object']
+            result["columnFields"] = []
+            result["valueFields"] = [c for c in df.columns if df[c].dtype in ('float64', 'int64')]
+            result["aggregations"] = ["count"] * len(result["valueFields"])
+
+        return result
     except Exception as e:
-        logger.warning("⚠️ 生成追问失败: %s", e)
-        return []
+        logger.warning("⚠️ 生成追问/字段映射失败: %s", e)
+        result["rowFields"] = [c for c in df.columns if df[c].dtype == 'object']
+        result["valueFields"] = [c for c in df.columns if df[c].dtype in ('float64', 'int64')]
+        result["aggregations"] = ["count"] * len(result["valueFields"])
+        return result
 
 
 def _do_agent_pipeline(query: str, session_id: str | None) -> dict:
@@ -500,9 +626,14 @@ def _do_agent_pipeline(query: str, session_id: str | None) -> dict:
         except Exception as plot_err:
             logger.warning("⚠️  plot 失败: %s", plot_err)
 
-        # Step 3.5: 生成后续追问建议
+        # Step 3.5: 生成后续追问建议 + 字段映射
         trace.set_phase("followup")
-        followup_questions = _generate_followup_questions(thread, df, query, answer)
+        fi = _generate_followup_questions(thread, df, query, answer)  # returns dict
+        followup_questions = fi["questions"]
+        ai_rowFields = fi["rowFields"] or [c for c in df.columns if df[c].dtype == 'object']
+        ai_columnFields = fi["columnFields"] or []
+        ai_valueFields = fi["valueFields"] or [c for c in df.columns if df[c].dtype in ('float64', 'int64')]
+        ai_aggregations = fi["aggregations"] or ["count"]
 
         # Step 4: build response
         data_payload = _dataframe_to_response(df)
@@ -519,9 +650,10 @@ def _do_agent_pipeline(query: str, session_id: str | None) -> dict:
             "success": True,
             "chart_type": chart_type_str,
             "config": {
-                "dimensions": [c for c in df.columns if df[c].dtype == 'object'],
-                "measures": [c for c in df.columns if df[c].dtype in ('float64', 'int64')],
-                "aggregation": "auto",
+                "rowFields": ai_rowFields,
+                "columnFields": ai_columnFields,
+                "valueFields": ai_valueFields,
+                "aggregations": ai_aggregations,
                 "session_id": session_id,
             },
             "sql": "-- 由 Chat Demo agent 自动生成",
@@ -601,8 +733,11 @@ async def chat_stream(request: ChatQueryRequest):
             # 预先初始化 thread+writer，确保 writer 可在主线程轮询
             sid, _thread, writer = _get_or_create_thread(session_id)
 
-            # 发送初始状态 — 每次请求都从这里开始
-            yield _sse_event("status", {"phase": "start", "message": "🔍 正在分析您的查询..."})
+            # 保存用户消息
+            append_message(sid, {"role": "user", "content": query, "timestamp": time.time()})
+
+            # 发送初始状态 — 每次请求都从这里开始，带上 sessionId 方便前端持久化
+            yield _sse_event("status", {"phase": "start", "message": "🔍 正在分析您的查询...", "session_id": sid})
 
             # 在 executor 中执行阻塞的 agent 管线
             loop = asyncio.get_event_loop()
@@ -692,6 +827,21 @@ async def chat_stream(request: ChatQueryRequest):
             result = future.result()
             elapsed_ms = (time.perf_counter() - t_start) * 1000
 
+            # 保存助手消息（含图表数据和 spec，用于刷新后恢复）
+            msg_data = result.get("data", {})
+            append_message(sid, {
+                "role": "assistant",
+                "content": result.get("message", ""),
+                "chartType": result.get("chart_type"),
+                "config": result.get("config"),
+                "_chartType": result.get("chart_type"),
+                "_chartSpec": msg_data.get("chart_spec"),
+                "_columns": msg_data.get("columns", []),
+                "_data": msg_data.get("data", []),
+                "_followups": result.get("followup_questions", []),
+                "timestamp": time.time(),
+            })
+
             # 发送最终结果
             result["elapsed_ms"] = round(elapsed_ms)
             yield _sse_event("result", result)
@@ -713,3 +863,38 @@ async def chat_stream(request: ChatQueryRequest):
             "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# 聊天历史 API
+# ---------------------------------------------------------------------------
+@router.get("/sessions")
+async def api_list_sessions():
+    """获取所有历史会话列表"""
+    try:
+        sessions = list_sessions()
+        return {"success": True, "sessions": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/history/{session_id}")
+async def api_get_history(session_id: str):
+    """获取某个会话的完整消息历史"""
+    try:
+        thread = get_thread(session_id)
+        if thread is None:
+            return {"success": True, "messages": [], "session_id": session_id}
+        return {"success": True, "messages": thread.get("messages", []), "session_id": session_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/history/{session_id}")
+async def api_delete_history(session_id: str):
+    """删除会话历史"""
+    try:
+        ok = delete_thread(session_id)
+        return {"success": ok, "message": "已删除" if ok else "会话不存在"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

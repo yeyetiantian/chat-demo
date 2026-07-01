@@ -257,12 +257,13 @@ async def startup():
     print("   浏览器将在服务就绪后自动打开（最长等待60秒）。")
 
 
-from app.api import pivot_router, chart_router, chat_router, chatdemo_router, trace_router  # noqa: E402
+from app.api import pivot_router, chart_router, chat_router, chatdemo_router, trace_router, chart_config_router  # noqa: E402
 app.include_router(pivot_router)
 app.include_router(chart_router)
 app.include_router(chat_router)
 app.include_router(chatdemo_router)
 app.include_router(trace_router)
+app.include_router(chart_config_router)
 
 
 if __name__ == "__main__":

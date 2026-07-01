@@ -63,6 +63,11 @@ export const renderChart = (data: {
 export const chatQuery = (query: string, context?: Record<string, any>) =>
   api.post('/chat/query', { query, context })
 
+// 聊天历史
+export const getChatHistory = (sessionId: string) => api.get(`/chat/history/${sessionId}`)
+export const listChatSessions = () => api.get('/chat/sessions')
+export const deleteChatHistory = (sessionId: string) => api.delete(`/chat/history/${sessionId}`)
+
 /**
  * SSE 流式对话 — 实时推送思考过程
  * @param query 用户问题
@@ -151,5 +156,14 @@ export const getChatDemoColumnDistinct = (
   api.get('/chatdemo/column/distinct', {
     params: { table_name: tableName, column_name: columnName, limit },
   })
+
+// ---- 图表配置（仪表盘） ----
+export const getChartList = () => api.get('/charts')
+export const getChartDetail = (id: string) => api.get(`/charts/${id}`)
+export const createChart = (config: any) => api.post('/charts', config)
+export const updateChart = (id: string, config: any) => api.put(`/charts/${id}`, config)
+export const deleteChart = (id: string) => api.delete(`/charts/${id}`)
+export const duplicateChart = (id: string) => api.post(`/charts/${id}/duplicate`)
+export const createChartFromAI = (data: any) => api.post('/charts/from-ai', data)
 
 export default api

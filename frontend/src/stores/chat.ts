@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { chatStream } from '../api'
+import { chatStream, getChatHistory } from '../api'
 
 export interface ThinkingStep {
   type: 'text' | 'tool' | 'sql'
@@ -16,25 +16,48 @@ export interface ChatMessage {
   _chartType?: string
   _chartSpec?: string
   _followups?: string[]
-  /** 该消息的思考过程（完成后保留） */
+  _saved?: boolean
   _thinkingSteps?: ThinkingStep[]
-  /** 该消息的状态文本 */
   _thinkingStatus?: string
-  /** UI 状态：思考过程是否展开 */
   _thinkingExpanded?: boolean
 }
 
 export const useChatStore = defineStore('chat', () => {
-  // ---- 状态（跨页面持久化） ----
   const messages = ref<ChatMessage[]>([])
-  const sessionId = ref<string | null>(null)
+
+  // 从 sessionStorage 恢复上次的 sessionId（仅存 ID，不存消息）
+  const savedSid = sessionStorage.getItem('datapivot_session_id') || null
+  const sessionId = ref<string | null>(savedSid)
+
   const loading = ref(false)
   const thinkingText = ref('')
   const thinkingSteps = ref<ThinkingStep[]>([])
 
   let abortCtrl: AbortController | null = null
 
-  // ---- 方法 ----
+  async function restoreHistory(sid?: string) {
+    const target = sid || sessionId.value
+    if (!target) return
+    sessionId.value = target
+    sessionStorage.setItem('datapivot_session_id', target)
+    try {
+      const { data: res } = await getChatHistory(target)
+      if (res.success) {
+        messages.value = (res.messages || []).map((m: any) => {
+          // 从保存的 _columns 和 _data 重建 _chartData
+          const chartData = (m._columns?.length || m._data?.length)
+            ? { columns: m._columns || [], rows: m._data || [] }
+            : undefined
+          return {
+            ...m,
+            _chartData: chartData,
+          }
+        })
+      }
+    } catch {
+      // 静默
+    }
+  }
 
   function sendMessage(text: string) {
     const q = text.trim()
@@ -45,7 +68,6 @@ export const useChatStore = defineStore('chat', () => {
     thinkingText.value = ''
     thinkingSteps.value = []
 
-    // 局部变量：本次请求的思考过程
     let currentStatus = ''
 
     abortCtrl = chatStream(
@@ -56,6 +78,11 @@ export const useChatStore = defineStore('chat', () => {
           case 'status':
             currentStatus = event.data.message || ''
             thinkingText.value = currentStatus
+            // 从初始状态事件中获取 sessionId（不等 result 事件）
+            if (event.data.session_id && !sessionId.value) {
+              sessionId.value = event.data.session_id
+              sessionStorage.setItem('datapivot_session_id', sessionId.value)
+            }
             break
 
           case 'thinking':
@@ -74,10 +101,10 @@ export const useChatStore = defineStore('chat', () => {
             const res = event.data
             if (res.config?.session_id) {
               sessionId.value = res.config.session_id
+              sessionStorage.setItem('datapivot_session_id', sessionId.value)
             }
             const answer = res.message || `已生成图表`
 
-            // 将本次思考过程快照保存到消息中
             const savedSteps = [...thinkingSteps.value]
             const savedStatus = currentStatus || thinkingText.value || ''
 
@@ -92,7 +119,7 @@ export const useChatStore = defineStore('chat', () => {
               _followups: res.followup_questions || [],
               _thinkingSteps: savedSteps.length > 0 ? savedSteps : undefined,
               _thinkingStatus: savedStatus || undefined,
-              _thinkingExpanded: false,  // 默认收起
+              _thinkingExpanded: false,
             })
             loading.value = false
             thinkingText.value = ''
@@ -135,6 +162,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     sessionId.value = null
     thinkingSteps.value = []
+    sessionStorage.removeItem('datapivot_session_id')
   }
 
   return {
@@ -146,5 +174,6 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     cancelRequest,
     clearHistory,
+    restoreHistory,
   }
 })

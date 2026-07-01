@@ -52,22 +52,35 @@ else:
     print("ℹ️  未找到 .env 文件，仅使用系统环境变量")
 
 # ============================================================
-# API Key 配置
+# LLM 提供商选择
 # ============================================================
-# 配置方式:
-#   1. 设置环境变量: export DEEPSEEK_API_KEY="sk-xxx"
-#   2. 创建 .env 文件: backend/app/.env → DEEPSEEK_API_KEY=sk-xxx
-#   获取 Key: https://platform.deepseek.com/api_keys
-# ============================================================
+# 可选值: deepseek（默认） | private | openai
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek").lower()
+
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "")
 
-# Chat Demo agent 通过 OPENAI_API_KEY / OPENAI_BASE_URL 连接 DeepSeek
-# (DeepSeek API 兼容 OpenAI SDK)
-if DEEPSEEK_API_KEY and not os.getenv("OPENAI_API_KEY"):
+# 统一设置 OPENAI 环境变量（Chat Demo / LangChain 通过此变量连接）
+if LLM_PROVIDER == "deepseek" and DEEPSEEK_API_KEY:
     os.environ["OPENAI_API_KEY"] = DEEPSEEK_API_KEY
-if DEEPSEEK_BASE_URL and os.getenv("OPENAI_BASE_URL") is None:
-    os.environ["OPENAI_BASE_URL"] = DEEPSEEK_BASE_URL
+    if DEEPSEEK_BASE_URL:
+        os.environ["OPENAI_BASE_URL"] = DEEPSEEK_BASE_URL
+elif LLM_PROVIDER == "openai":
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
+elif LLM_PROVIDER == "private":
+    # 私有 LLM 用占位 key，实际认证通过自定义 httpx client 处理
+    os.environ["OPENAI_API_KEY"] = "private-llm-placeholder"
+
+# ============================================================
+# 私有 LLM 配置（仅 LLM_PROVIDER=private 时生效）
+# ============================================================
+PRIVATE_LLM_TOKEN_URL = os.getenv("PRIVATE_LLM_TOKEN_URL", "")
+PRIVATE_LLM_API_URL = os.getenv("PRIVATE_LLM_API_URL", "")
+PRIVATE_LLM_CLIENT_ID = os.getenv("PRIVATE_LLM_CLIENT_ID", "")
+PRIVATE_LLM_CLIENT_SECRET = os.getenv("PRIVATE_LLM_CLIENT_SECRET", "")
+PRIVATE_LLM_MODEL = os.getenv("PRIVATE_LLM_MODEL", "qwen-72b-chat-int4")
 
 # 日志级别
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

@@ -4,6 +4,7 @@
       <div class="chat-header">
         <h2>AI 报表助手</h2>
         <span class="chat-hint">输入自然语言，AI 自动生成数据透视图表</span>
+        <button class="btn-new-chat" @click="newChat" title="开始新对话">➕ 新对话</button>
       </div>
 
       <div class="chat-messages" ref="msgRef">
@@ -59,13 +60,22 @@
             </div>
 
             <!-- 图表嵌入在气泡内 -->
-            <div v-if="msg.chartType && msg._chartData" class="message-chart">
+            <div v-if="msg.chartType && (msg._chartData || msg._chartSpec)" class="message-chart">
               <ChartRenderer
                 :chartType="(msg._chartType || 'bar') as ChartType"
-                :data="msg._chartData"
+                :data="msg._chartData || { columns: [], rows: [] }"
                 :chartSpec="msg._chartSpec"
                 :inline="true"
               />
+              <!-- 保存到仪表盘 -->
+              <button
+                v-if="msg._chartData && msg._saved !== true"
+                class="btn-save-chart"
+                @click="saveChartToDashboard(msg)"
+              >
+                📥 保存到仪表盘
+              </button>
+              <span v-else-if="msg._saved === true" class="saved-hint">✅ 已保存到仪表盘</span>
             </div>
             <!-- 追问建议（仅最后一条 assistant 消息） -->
             <div
@@ -127,9 +137,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '../stores/chat'
+import * as api from '../api'
 import ChartRenderer from '../components/charts/ChartRenderer.vue'
 import type { ChartType } from '../components/charts/ChartRenderer.vue'
 
@@ -137,6 +148,13 @@ const store = useChatStore()
 const { messages, loading, thinkingText, thinkingSteps } = storeToRefs(store)
 const query = ref('')
 const msgRef = ref<HTMLElement | null>(null)
+
+onMounted(() => {
+  // 如果有上次的 sessionId，恢复对话历史
+  if (store.sessionId) {
+    store.restoreHistory(store.sessionId)
+  }
+})
 
 const suggestions = [
   '按车型统计报警数量',
@@ -252,6 +270,59 @@ function sendMessage(text: string) {
   scrollBottom()
 }
 
+function newChat() {
+  if (store.messages.length === 0) return
+  if (confirm('开始新对话将清空当前聊天记录？')) {
+    store.clearHistory()
+  }
+}
+
+async function saveChartToDashboard(msg: any) {
+  try {
+    // 找到用户的问题（消息列表中 msg 之前的最后一条 user 消息）
+    const userQuery = store.messages
+      .slice(0, store.messages.indexOf(msg))
+      .filter(m => m.role === 'user')
+      .pop()?.content || ''
+
+    // 从数据列推断维度和度量
+    const cols = msg._chartData?.columns || []
+    const rows = msg._chartData?.rows || msg._chartData?.data || []
+    // 字符串列 → 维度，数值列 → 度量
+    const inferredDims: string[] = []
+    const inferredMeasures: string[] = []
+    if (rows.length > 0) {
+      const firstRow = rows[0]
+      for (const c of cols) {
+        if (typeof firstRow[c] === 'number') {
+          inferredMeasures.push(c)
+        } else {
+          inferredDims.push(c)
+        }
+      }
+    }
+
+    const payload = {
+      query: userQuery,
+      chart_type: msg._chartType || 'bar',
+      chart_spec: msg._chartSpec ? (typeof msg._chartSpec === 'string' ? JSON.parse(msg._chartSpec) : msg._chartSpec) : null,
+      data: rows,
+      columns: cols,
+      rowFields: msg.config?.rowFields?.length ? msg.config.rowFields : inferredDims,
+      columnFields: msg.config?.columnFields || [],
+      valueFields: msg.config?.valueFields?.length ? msg.config.valueFields : inferredMeasures,
+      aggregations: msg.config?.aggregations?.length ? msg.config.aggregations : ['count'],
+    }
+    const { data: res } = await api.createChartFromAI(payload)
+    if (res.success) {
+      msg._saved = true
+    }
+  } catch (e: any) {
+    console.error('保存图表失败:', e)
+    alert('保存失败: ' + (e.message || '未知错误'))
+  }
+}
+
 function scrollBottom() {
   // requestAnimationFrame 确保在浏览器完成布局后再读取 scrollHeight
   requestAnimationFrame(() => {
@@ -286,6 +357,21 @@ function scrollBottom() {
 .chat-hint {
   font-size: 12px;
   color: #909399;
+}
+.btn-new-chat {
+  float: right;
+  margin-top: -4px;
+  padding: 5px 12px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #606266;
+}
+.btn-new-chat:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 .chat-messages {
   flex: 1;
@@ -533,4 +619,21 @@ function scrollBottom() {
   color: #fff;
   border-color: #409eff;
 }
+.btn-save-chart {
+  display: block;
+  margin: 8px auto 0;
+  padding: 5px 14px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--primary-color);
+  transition: all 0.15s;
+}
+.btn-save-chart:hover {
+  background: #ecf5ff;
+  border-color: var(--primary-color);
+}
+.saved-hint { display: block; text-align: center; font-size: 12px; color: #67c23a; margin-top: 4px; }
 </style>

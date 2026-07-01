@@ -2,8 +2,8 @@
   <div class="chart-wrapper" :style="{ minHeight: inline ? '280px' : '350px' }">
     <!-- 错误状态 -->
     <div v-if="error" class="chart-status error">{{ error }}</div>
-    <!-- 无数据状态 -->
-    <div v-else-if="!hasData" class="chart-status">暂无数据</div>
+    <!-- 无数据状态（除非有 chartSpec） -->
+    <div v-else-if="!hasData && !props.chartSpec" class="chart-status">暂无数据</div>
     <!-- 正常渲染 -->
     <template v-else>
       <div ref="vegaContainer" class="vega-container" :style="{ width: '100%', minHeight: inline ? '280px' : '350px' }"></div>
@@ -70,7 +70,15 @@ function buildSpec(): any | null {
     try {
       const spec = typeof props.chartSpec === 'string' ? JSON.parse(props.chartSpec) : props.chartSpec
       const rawRows = toRawData(props.data?.rows || props.data?.data) || []
-      if (rawRows.length === 0) return null
+
+      // 没数据但有 spec → 直接用 spec（可能需要嵌入的 data）
+      if (rawRows.length === 0) {
+        return {
+          ...spec,
+          width: props.width || 'container',
+          height: props.inline ? 260 : (props.height || 350),
+        }
+      }
 
       // 验证 spec 的 encoding 字段名是否与数据匹配
       const specFields = _extract_fields(spec.encoding)

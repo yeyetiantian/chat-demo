@@ -31,8 +31,8 @@ python test_build.py
 
 - **后端**: FastAPI + DuckDB (连接 `vcloud_duck.db` 只读) + DeepSeek API + Chat Demo 0.6.2 (内省 + Plotly 渲染)
 - **前端**: Vue 3 + Vue Router 4 (hash 模式) + Pinia + Vega-Lite (vega-embed) + Axios
-- **打包**: PyInstaller (单文件 .exe)
-- 数据源：`vcloud_duck.db` (6 张真实业务表，只读模式)
+- **打包**: PyInstaller (单文件可执行程序，跨平台)
+- **数据源**: `vcloud_duck.db` (6 张真实业务表，只读模式)
 
 ## 数据库 Schema
 
@@ -67,13 +67,14 @@ services/
 models/schema.py → Pydantic 模型 (ChartType/AggregationType 枚举, 请求/响应)
 config.py        → 配置加载 (.env 多级查找) + 数据库路径解析
 utils/logger.py  → 统一日志 (含 LLM 调用专用日志器 + 耗时装饰器)
+server_main.py   → PyInstaller 打包用的单独入口（嵌入 SPAStaticMiddleware 处理静态文件），不在常规开发中使用
 ```
 
 ### 后端关键点
 
 - **DuckDBService** 是模块级单例，整个进程共享一个只读连接。不使用 VIEW（因只读限制），改用 `WITH v AS (JOIN...)` CTE 查询。聚合查询包含类型感知机制：`SUM(时间列)` 自动降级为 `COUNT`。信号字段（243 种）通过标量子查询从 `TL_RMU_PS_TASK_RULE_RESULT_SIGNAL` 表实时提取数值。
-- **config.py** 会按优先级从多个位置加载 `.env` 文件：`$DATAPIVOT_ENV` → `sys.executable` 同目录 → `Path.cwd()` → `_MEIPASS` (PyInstaller) → `backend/app/.env` → `backend/.env` → 项目根 `.env`。`DEEPSEEK_API_KEY` 自动同步到 `OPENAI_API_KEY` 环境变量（DeepSeek 兼容 OpenAI SDK）。
-- **Chat API** (`chat.py`) 同时提供非流式 (`POST /api/chat/query`) 和 SSE 流式 (`POST /api/chat/stream`)。使用 Chat Demo 的 `agent.thread()` 实现多轮对话（session_id 键值对）。流式模式通过 `_StreamingWriter` 线程安全捕获中间输出，经 SSE 实时推送给前端。**LLM 调用本身依赖 LangChain 生态，跨系统和 patch 会影响其稳定性，修改 trace_service.py 或 chat.py 时务必谨慎测试完整链路**。
+- **config.py** 会按优先级从多个位置加载 `.env` 文件：`$DATAPIVOT_ENV` → `sys.executable` 同目录 → `Path.cwd()` → `_MEIPASS` (PyInstaller) → `backend/app/.env` → `backend/.env` → 项目根 `.env`。`DEEPSEEK_API_KEY` 自动同步到 `OPENAI_API_KEY` 环境变量（DeepSeek 兼容 OpenAI SDK）。数据库路径同理，优先检测 exe 同目录的外部数据库，再回退到内置默认库。
+- **Chat API** (`chat.py`) 同时提供非流式 (`POST /api/chat/query`) 和 SSE 流式 (`POST /api/chat/stream`)。使用 Chat Demo 的 `agent.thread()` 实现多轮对话（session_id 键值对）。流式模式通过 `_StreamingWriter` 线程安全捕获中间输出，经 SSE 实时推送给前端。无 API Key 时直接报错不初始化 agent。
 - **Trace 服务** (`trace_service.py`) 通过 monkey-patch `BaseChatModel._generate_with_cache` 和 `BaseTool.invoke` 实现全链路追踪。使用 `contextvars.ContextVar` 隔离多请求并发，输出 JSON 文件到 `backend/logs/traces/`。
 - **路由注册** 在 `api/__init__.py` 中导出 5 个 router 对象，由 `main.py` 统一 `app.include_router()`。
 
@@ -99,10 +100,64 @@ App.vue                  → App shell：顶部导航栏 + <router-view>
 ### 前端关键点
 
 - **4 个页面**通过顶部导航栏切换：💬 AI 对话 / 📊 拖拽透视 / 🖥️ Chat Demo 联动 / 🔍 链路追踪，首页 `/` 重定向到 `/chat`。
-- **路由使用 hash 模式** (`createWebHashHistory`)，路径为 `/#/chat`、`/#/pivot` 等。这意味着后端不需要为 SPA 路由做 fallback 配置——但在 PyInstaller 打包场景中，`server_main.py` 仍需将所有非 API 请求返回 index.html。
+- **路由使用 hash 模式** (`createWebHashHistory`)，路径为 `/#/chat`、`/#/pivot` 等。
 - **SSE 流式对话** (`api/index.ts` 中的 `chatStream` 函数) 使用原生 `fetch` + `ReadableStream`，手动解析 SSE 事件流。事件类型：`status`、`thinking`、`tool`、`sql`、`result`、`done`、`error`。
 - **`ChartRenderer.vue`** 根据 `chartType` prop 动态构建 Vega-Lite spec（支持 bar/pie/line/waveform/radar/scatter），优先使用后端生成的 `chartSpec`（Vega-Lite JSON spec），回退到前端本地构建 spec。
 - **API 超时** 设置为 2 分钟（`1000 * 120`），因为 Chat Demo agent 推理需要较长时间。
+
+## CI / CD (`.github/workflows/build.yml`)
+
+GitHub Actions 自动构建 4 个平台：Windows x64、macOS x64 (Intel)、macOS arm64 (Apple Silicon)、Linux x64。
+
+流程：
+1. Setup Python 3.11 + Node.js 20
+2. 从 Secrets 创建 `.env`（含 API Key）
+3. `npm ci` 安装前端依赖
+4. `python3 build.py` 执行完整打包
+   - 自动创建 venv + 安装依赖（含 `databao-agent`、`pyinstaller`）
+   - 构建前端
+   - PyInstaller 打包
+   - 复制 exe + `vcloud_duck.db` + `.env` 到 `dist/`
+5. 上传 Artifacts，打 tag 时发布 Release
+
+## 打包相关 (`build.py`)
+
+`build.py` 是项目核心打包脚本，全自动完成：
+
+| 步骤 | 说明 |
+|------|------|
+| 0. 准备虚拟环境 | 自动创建 venv、`pip install -r requirements.txt`、`pyinstaller`、`databao-agent` |
+| 1. 打包前端 | `npm run build` → `frontend/dist/` |
+| 2. 创建主程序 | 生成 `backend/app/server_main.py`（FastAPI + SPAStaticMiddleware） |
+| 3. 打包后端 | PyInstaller `--onefile --console --name DataPivot` |
+| 4. 复制文件 | exe、`vcloud_duck.db`、`.env` 都放到 `dist/` |
+| 5. 使用说明 | 生成 `dist/README.txt` |
+
+### PyInstaller 参数
+
+```
+--onefile                    # 单文件 exe
+--console                    # 显示控制台窗口
+--name DataPivot             # 输出文件名
+--distpath dist/backend_dist # 输出目录
+--add-data frontend/dist;frontend/dist  # 前端静态文件
+--collect-all databao        # 收集 databao 数据文件
+--hidden-import databao.agent等  # 动态导入的模块
+```
+
+### 产物结构
+
+```
+dist/
+├── DataPivot(.exe)     ← 双击直接运行
+├── vcloud_duck.db      ← 默认数据库（可替换）
+├── .env                ← API Key 配置（可编辑）
+└── README.txt          ← 使用说明
+```
+
+- 用户电脑无需安装 Python 或 Node.js
+- `.env` 和数据库都放 exe 同目录，方便替换
+- 关闭控制台窗口即终止程序
 
 ## API 端点一览
 
@@ -134,17 +189,11 @@ App.vue                  → App shell：顶部导航栏 + <router-view>
 | `/api/chatdemo/table/stats` | GET | 表数据画像 |
 | `/api/chatdemo/column/distinct` | GET | 列去重值 |
 
-## 打包相关
-
-- `build.py` — 完整打包脚本（前端构建 → 创建 server_main.py → PyInstaller 打包 → 最终整理），生成 `dist/DataPivot.exe`
-- `test_build.py` — 打包后程序功能测试脚本
-- `BUILD.md` — 打包文档
-- `server_main.py` — PyInstaller 打包用的单独入口（嵌入 SPAStaticMiddleware 处理静态文件），不在常规开发中使用
-- PyInstaller 参数：`--onefile --console --add-data "index.html;." --add-data "frontend/dist;frontend/dist" --add-data "vcloud_duck.db;."`
-
 ## 注意事项
 
 - DuckDB 连接为只读模式 (`read_only=True`)，不要尝试写入数据库
 - `vcloud_duck.db` 是 6 表关联的业务数据库（714 / 13,163 / 3,109 / 301 / 23,127 行），只读不可修改
 - 修改 `trace_service.py` 的 monkey-patch 逻辑或 `chat.py` 的 agent 管线时务必谨慎——LLM 调用依赖复杂的 LangChain + Chat Demo 内部状态，建议修改后完整测试非流式、流式和链路追踪三条路径
 - 前后端 API 通过 `frontend/vite.config.ts` 的 proxy 配置在开发模式下联调（端口 3000 → 8080）
+- PyInstaller 对 `databao` 的 hidden import 需要精确指定，不要随意增减
+- `os`、`re`、`uuid` 等标准库模块如果在打包后报 `NameError`，先检查源码里有没有对应的 `import` 语句
