@@ -25,7 +25,7 @@
           :chartType="fullChart.chart_type as ChartType"
           :data="fullChart.data && fullChart.data.length > 0 ? { columns: fullChart.columns, rows: fullChart.data } : null"
           :chartSpec="fullChart.chart_spec ? (typeof fullChart.chart_spec === 'string' ? fullChart.chart_spec : JSON.stringify(fullChart.chart_spec)) : undefined"
-          :height="300"
+          :height="200"
         />
       </div>
 
@@ -122,30 +122,30 @@ onMounted(loadChart)
 }
 .card-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 0;
-  gap: 8px;
+  padding: 8px 10px 0;
+  gap: 6px;
 }
 .card-info { flex: 1; min-width: 0; }
-.card-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-meta { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
-.card-type { font-size: 11px; color: #909399; background: #f0f2f5; padding: 2px 8px; border-radius: 4px; }
-.card-source { font-size: 11px; }
-.card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.card-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-meta { display: flex; gap: 4px; align-items: center; margin-top: 2px; }
+.card-type { font-size: 10px; color: #909399; background: #f0f2f5; padding: 1px 6px; border-radius: 3px; }
+.card-source { font-size: 10px; }
+.card-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .card-btn {
-  padding: 4px 8px; border: none; background: transparent;
-  font-size: 14px; cursor: pointer; border-radius: 4px; line-height: 1;
+  padding: 2px 6px; border: none; background: transparent;
+  font-size: 12px; cursor: pointer; border-radius: 3px; line-height: 1;
 }
 .card-btn:hover { background: #f0f2f5; }
 .card-btn.danger:hover { background: #fef0f0; }
 .card-chart {
-  padding: 8px 14px 4px;
-  min-height: 280px;
+  padding: 4px 10px 2px;
+  min-height: 160px;
 }
 .card-query {
-  padding: 6px 14px 10px;
-  font-size: 11px;
+  padding: 4px 10px 8px;
+  font-size: 10px;
   color: #909399;
   overflow: hidden;
   text-overflow: ellipsis;

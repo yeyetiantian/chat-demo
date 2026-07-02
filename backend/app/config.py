@@ -82,6 +82,12 @@ PRIVATE_LLM_CLIENT_ID = os.getenv("PRIVATE_LLM_CLIENT_ID", "")
 PRIVATE_LLM_CLIENT_SECRET = os.getenv("PRIVATE_LLM_CLIENT_SECRET", "")
 PRIVATE_LLM_MODEL = os.getenv("PRIVATE_LLM_MODEL", "qwen-72b-chat-int4")
 
+# ============================================================
+# AI Agent 配置
+# ============================================================
+AI_RECURSION_LIMIT = int(os.getenv("AI_RECURSION_LIMIT", "200"))
+AI_STRICT_MODE = os.getenv("AI_STRICT_MODE", "").lower() in ("1", "true", "yes")
+
 # 日志级别
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 

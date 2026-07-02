@@ -1,12 +1,12 @@
 <template>
-  <div class="chart-wrapper" :style="{ minHeight: inline ? '280px' : '350px' }">
+  <div class="chart-wrapper" >
     <!-- 错误状态 -->
     <div v-if="error" class="chart-status error">{{ error }}</div>
     <!-- 无数据状态（除非有 chartSpec） -->
     <div v-else-if="!hasData && !props.chartSpec" class="chart-status">暂无数据</div>
     <!-- 正常渲染 -->
     <template v-else>
-      <div ref="vegaContainer" class="vega-container" :style="{ width: '100%', minHeight: inline ? '280px' : '350px' }"></div>
+      <div ref="vegaContainer" class="vega-container" :style="{ width: '100%', minHeight: '280px'}"></div>
     </template>
   </div>
 </template>

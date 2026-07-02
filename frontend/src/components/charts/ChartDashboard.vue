@@ -1,7 +1,7 @@
 <template>
   <div class="chart-dashboard">
     <div class="dashboard-header">
-      <h2>📊 图表仪表盘</h2>
+      <h2>📊 柔性报表</h2>
       <span class="dashboard-count" v-if="charts.length">{{ charts.length }} 个图表</span>
       <button class="btn-add" @click="$emit('add')">➕ 新建图表</button>
       <button class="btn-refresh" @click="loadCharts" :disabled="loading">🔄</button>
@@ -122,7 +122,7 @@ onMounted(loadCharts)
 .empty-desc { font-size: 13px; }
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 </style>

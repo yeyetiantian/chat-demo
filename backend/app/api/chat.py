@@ -88,7 +88,7 @@ def _refresh_private_llm_token() -> str:
 
 def _patch_chatopenai_for_private_llm():
     """通过 monkey-patch ChatOpenAI 注入自定义 http_client，支持 access_token 请求头"""
-    from ..config import PRIVATE_LLM_CLIENT_ID, LLM_PROVIDER
+    from ..config import PRIVATE_LLM_CLIENT_ID, LLM_PROVIDER, AI_STRICT_MODE
     if LLM_PROVIDER != "private":
         return
 
@@ -117,8 +117,8 @@ def _patch_chatopenai_for_private_llm():
     original_bind_tools = ChatOpenAI.bind_tools
 
     def _patched_bind_tools(self, tools, **kwargs):
-        kwargs["strict"] = False
-        # kwargs["parallel_tool_calls"] = False
+        if not AI_STRICT_MODE:
+            kwargs["strict"] = False
         return original_bind_tools(self, tools, **kwargs)
 
     ChatOpenAI.bind_tools = _patched_bind_tools
@@ -259,8 +259,9 @@ def _get_agent():
         logger.info("📊 Chat Demo domain | DuckDB 已绑定")
 
         # 创建 agent（提高递归限制避免 LangGraph 超限）
+        from ..config import AI_RECURSION_LIMIT
         from databao.agent.configs.agent import AgentConfig
-        agent_config = AgentConfig(recursion_limit=200)
+        agent_config = AgentConfig(recursion_limit=AI_RECURSION_LIMIT)
         try:
             _agent = bao.agent(domain, name="datapivot", llm_config=llm_config, agent_config=agent_config)
         except Exception as e:
@@ -515,7 +516,7 @@ def _fix_timedelta_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: str) -> dict:
-    """基于当前对话上下文，生成 3 个后续追问建议 + 字段映射"""
+    """基于当前对话上下文，生成追问建议 + 字段映射"""
     result = {"questions": [], "rowFields": [], "columnFields": [], "valueFields": [], "aggregations": []}
     try:
         cols_list = list(df.columns[:8])
@@ -526,28 +527,48 @@ def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: s
             type_hints.append(f"{c}({label})")
         types_str = "; ".join(type_hints)
 
-        thread.ask(
-            f"用户刚才问了：「{query}」。你的回答摘要：{answer[:200]}。"
-            f"当前数据字段及类型：{types_str}。"
-            f"\n\n请完成：\n"
-            f"1. 生成 3 个用户可能感兴趣的相关追问，每行以' - '开头。\n"
-            f"2. 在最后输出一个 JSON 对象，包含字段映射信息。\n"
-            f"\nJSON 格式：\n"
-            f"```json\n"
-            f"{{\n"
-            f'  "rowFields": ["文本维度字段1", "文本维度字段2"],\n'
-            f'  "columnFields": ["文本维度字段3", "文本维度字段4"],\n'
-            f'  "valueFields": ["数据库中的数值字段名"],\n'
-            f'  "aggregations": ["count"]\n'
-            f"}}\n"
-            f"```\n"
-            f"要求：\n"
-            f"- rowFields 是文本分类字段（行维度），如车型、规则名称等\n"
-            f"- columnFields 是文本分类字段（列维度），如车型、规则名称等\n"
-            f"- valueFields 是数据库中的原始数值字段名，不是计算出来的别名\n"
-            f"- 如果「报警数量」是 COUNT 某个字段的结果，valueFields 填那个原始字段名\n"
-            f"- aggregations 只能是 count、sum、avg、min、max 中的一个\n"
-        )
+        # 检测是否是多维度/多图表分析请求
+        is_multi = any(kw in query.lower() for kw in ["多维度", "多角度", "多图表", "全面", "多个", "各方面", "多种分析"])
+
+        if is_multi:
+            prompt = (
+                f"用户要求「{query}」，需要多维度分析。当前数据字段及类型：{types_str}。"
+                f"\n\n请完成：\n"
+                f"1. 生成 6 个不同维度的分析问题，覆盖不同的图表类型（柱状图、饼图、折线图等），"
+                f"每个问题只关注一个分析维度，用'dim'前缀标记。\n"
+                f"输出格式：\n"
+                f" - dim 问题1\n"
+                f" - dim 问题2\n"
+                f" ...\n"
+                f"2. 最后输出字段映射 JSON（用第一个分析问题的字段即可）。\n"
+                f"```json\n"
+                f"{{\"rowFields\":[],\"columnFields\":[],\"valueFields\":[],\"aggregations\":[]}}\n"
+                f"```\n"
+            )
+        else:
+            prompt = (
+                f"用户刚才问了：「{query}」。你的回答摘要：{answer[:200]}。"
+                f"当前数据字段及类型：{types_str}。"
+                f"\n\n请完成：\n"
+                f"1. 生成 3 个用户可能感兴趣的相关追问，每行以' - '开头。\n"
+                f"2. 在最后输出一个 JSON 对象，包含字段映射信息。\n"
+                f"\nJSON 格式：\n"
+                f"```json\n"
+                f"{{\n"
+                f'  "rowFields": ["文本维度字段1", "文本维度字段2"],\n'
+                f'  "columnFields": ["文本维度字段3", "文本维度字段4"],\n'
+                f'  "valueFields": ["数据库中的数值字段名"],\n'
+                f'  "aggregations": ["count"]\n'
+                f"}}\n"
+                f"```\n"
+                f"要求：\n"
+                f"- rowFields 是文本分类字段（行维度），如车型、规则名称等\n"
+                f"- columnFields 是文本分类字段（列维度），如车型、规则名称等\n"
+                f"- valueFields 是数据库中的原始数值字段名，不是计算出来的别名\n"
+                f"- 如果「报警数量」是 COUNT 某个字段的结果，valueFields 填那个原始字段名\n"
+                f"- aggregations 只能是 count、sum、avg、min、max 中的一个\n"
+            )
+        thread.ask(prompt)
         text = thread.text()
 
         # 解析追问
@@ -556,9 +577,12 @@ def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: s
             stripped = line.strip()
             if stripped.startswith("- ") or stripped.startswith("-"):
                 q = stripped.lstrip("- ").strip()
-                if q and len(q) < 60:
+                # 多维度模式：去掉 dim 前缀
+                if q.startswith("dim ") or q.startswith("dim "):
+                    q = q[4:].strip()
+                if q and len(q) < 80:
                     questions.append(q)
-        result["questions"] = questions[:3] if len(questions) >= 2 else []
+        result["questions"] = questions[:6] if len(questions) >= 2 else []
 
         # 解析 JSON 字段映射
         import re as _re

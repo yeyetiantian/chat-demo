@@ -2,7 +2,7 @@
   <div class="pivot-page">
     <div class="pivot-tabs">
       <button :class="{ active: activeTab === 'dashboard' }" @click="activeTab = 'dashboard'">
-        📊 仪表盘
+        📊 柔性报表
       </button>
       <button :class="{ active: activeTab === 'config' }" @click="switchToConfig()">
         ⚙️ 配置
