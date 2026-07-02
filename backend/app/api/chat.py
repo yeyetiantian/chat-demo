@@ -115,10 +115,10 @@ def _patch_chatopenai_for_private_llm():
 
     # 2. patch bind_tools: model_bind_tools 会传 strict=True，私有 LLM 不支持
     original_bind_tools = ChatOpenAI.bind_tools
-    from langchain_core.output_parsers.openai_tools import JsonOutputToolsParser
 
     def _patched_bind_tools(self, tools, **kwargs):
-        kwargs["output_parser"] = JsonOutputToolsParser()
+        kwargs["strict"] = False
+        # kwargs["parallel_tool_calls"] = False
         return original_bind_tools(self, tools, **kwargs)
 
     ChatOpenAI.bind_tools = _patched_bind_tools

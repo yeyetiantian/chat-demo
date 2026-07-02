@@ -23,7 +23,7 @@
       <div class="card-chart">
         <ChartRenderer
           :chartType="fullChart.chart_type as ChartType"
-          :data="fullChart.data ? { columns: fullChart.columns, rows: fullChart.data } : null"
+          :data="fullChart.data && fullChart.data.length > 0 ? { columns: fullChart.columns, rows: fullChart.data } : null"
           :chartSpec="fullChart.chart_spec ? (typeof fullChart.chart_spec === 'string' ? fullChart.chart_spec : JSON.stringify(fullChart.chart_spec)) : undefined"
           :height="300"
         />
@@ -63,7 +63,28 @@ const typeLabel = computed(() => {
 async function loadChart() {
   try {
     const { data: res } = await api.getChartDetail(props.chart.chart_id)
-    if (res.success) fullChart.value = res.chart
+    if (res.success) {
+      let chart = res.chart
+      // 有 data_config 但无数据时，从数据库查询
+      const dc = chart.data_config || {}
+      if ((!chart.data || chart.data.length === 0) && (dc.rowFields?.length || dc.columnFields?.length || dc.valueFields?.length)) {
+        try {
+          const dims = [...(dc.rowFields || []), ...(dc.columnFields || [])]
+          const vals = dc.valueFields || []
+          if (dims.length > 0 || vals.length > 0) {
+            const { data: q } = await api.getChartData(chart.chart_type || 'bar', dims, vals.length > 0 ? vals : ['持续时间'])
+            if (q.success) {
+              const apiData = q.data?.data || q.data?.rows || []
+              chart.data = apiData
+              chart.columns = q.data?.columns || chart.columns
+            }
+          }
+        } catch {
+          // 查询失败不影响加载
+        }
+      }
+      fullChart.value = chart
+    }
   } catch {
     // 静默
   }

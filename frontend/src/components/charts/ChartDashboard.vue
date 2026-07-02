@@ -7,6 +7,10 @@
       <button class="btn-refresh" @click="loadCharts" :disabled="loading">🔄</button>
     </div>
 
+    <!-- 固定在左上角的 AI 对话按钮 -->
+    <button class="btn-ai-float" @click="showChat = true" title="AI 对话">💬</button>
+    <ChatDialog :visible="showChat" @close="showChat = false" />
+
     <div v-if="loading" class="loading-state">加载中...</div>
 
     <div v-else-if="charts.length === 0" class="empty-state">
@@ -31,6 +35,7 @@
 import { ref, onMounted } from 'vue'
 import * as api from '../../api'
 import ChartCard from './ChartCard.vue'
+import ChatDialog from './ChatDialog.vue'
 
 defineEmits<{
   edit: [id: string]
@@ -39,6 +44,7 @@ defineEmits<{
 
 const charts = ref<any[]>([])
 const loading = ref(false)
+const showChat = ref(false)
 
 async function loadCharts() {
   loading.value = true
@@ -59,7 +65,24 @@ onMounted(loadCharts)
   overflow-y: auto;
   padding: 20px;
   background: #f5f7fa;
+  position: relative;
 }
+.btn-ai-float {
+  position: fixed;
+  bottom: 72px;
+  right: 20px;
+  z-index: 99;
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  color: #fff;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(64,158,255,0.4);
+  transition: transform 0.2s;
+}
+.btn-ai-float:hover { transform: scale(1.1); }
 .dashboard-header {
   display: flex;
   align-items: center;
