@@ -187,13 +187,18 @@ async function saveCurrent() {
   if (!chartName.value.trim()) return
   saving.value = true
   try {
+    // 从已加载的完整 chart 中取数据（即使没重新查询，也不丢失原始数据）
+    const chartDetail = currentChartId.value ? (await api.getChartDetail(currentChartId.value)).data?.chart : null
+    const savedData = chartDetail?.data || []
+    const savedColumns = chartDetail?.columns || []
+
     const config: any = {
       chart_id: currentChartId.value || undefined,
       name: chartName.value,
       description: chartDesc.value,
       chart_type: store.currentChartType,
-      chart_spec: store.chartData?.chart_spec || null,
-      columns: store.chartData?.columns || [],
+      chart_spec: store.chartData?.chart_spec || chartDetail?.chart_spec || null,
+      columns: store.chartData?.columns || savedColumns,
       data_config: {
         rowFields: [...store.rowFields],
         columnFields: [...store.columnFields],
@@ -202,9 +207,8 @@ async function saveCurrent() {
         filters: {},
       },
     }
-    if (store.chartData?.rows) {
-      config.data = store.chartData.rows
-    }
+    // 优先用重新查询后的数据，否则保留原始数据
+    config.data = store.chartData?.rows || savedData
 
     const { data: res } = currentChartId.value
       ? await api.updateChart(currentChartId.value, config)

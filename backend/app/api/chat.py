@@ -95,10 +95,10 @@ def _patch_chatopenai_for_private_llm():
     import httpx
     from langchain_openai import ChatOpenAI
 
+    # 1. patch __init__: 注入自定义 http_client（access_token 认证）
     original_init = ChatOpenAI.__init__
 
     def _patched_init(self, *args, **kwargs):
-        # 创建自定义 httpx client，每次请求自动带上 access_token
         custom_client = httpx.Client(
             auth=_PrivateLLMAuth(),
             headers={
@@ -112,8 +112,17 @@ def _patch_chatopenai_for_private_llm():
         return original_init(self, *args, **kwargs)
 
     ChatOpenAI.__init__ = _patched_init
-    logger.info("🔌 私有 LLM http_client 已注入")
 
+    # 2. patch bind_tools: model_bind_tools 会传 strict=True，私有 LLM 不支持
+    original_bind_tools = ChatOpenAI.bind_tools
+    from langchain_core.output_parsers.openai_tools import JsonOutputToolsParser
+
+    def _patched_bind_tools(self, tools, **kwargs):
+        kwargs["output_parser"] = JsonOutputToolsParser()
+        return original_bind_tools(self, tools, **kwargs)
+
+    ChatOpenAI.bind_tools = _patched_bind_tools
+    logger.info("🔌 私有 LLM http_client + bind_tools 已适配")
 
 class _PrivateLLMAuth(httpx.Auth):
     """httpx Auth handler：在每次请求前自动注入 access_token"""
@@ -195,6 +204,7 @@ def _get_agent():
     global _agent
     if _agent is None:
         import databao.agent as bao
+
         from ..config import (
             LLM_PROVIDER,
             DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL,
@@ -526,13 +536,14 @@ def _generate_followup_questions(thread, df: pd.DataFrame, query: str, answer: s
             f"```json\n"
             f"{{\n"
             f'  "rowFields": ["文本维度字段1", "文本维度字段2"],\n'
-            f'  "columnFields": [],\n'
+            f'  "columnFields": ["文本维度字段3", "文本维度字段4"],\n'
             f'  "valueFields": ["数据库中的数值字段名"],\n'
             f'  "aggregations": ["count"]\n'
             f"}}\n"
             f"```\n"
             f"要求：\n"
-            f"- rowFields 是文本分类字段（维度），如车型、规则名称等\n"
+            f"- rowFields 是文本分类字段（行维度），如车型、规则名称等\n"
+            f"- columnFields 是文本分类字段（列维度），如车型、规则名称等\n"
             f"- valueFields 是数据库中的原始数值字段名，不是计算出来的别名\n"
             f"- 如果「报警数量」是 COUNT 某个字段的结果，valueFields 填那个原始字段名\n"
             f"- aggregations 只能是 count、sum、avg、min、max 中的一个\n"
