@@ -114,24 +114,11 @@ def _patch_chatopenai_for_private_llm():
     ChatOpenAI.__init__ = _patched_init
 
 class _PrivateLLMAuth(httpx.Auth):
-    """httpx Auth handler：在每次请求前自动注入 access_token，并清理请求体中的不兼容参数"""
+    """httpx Auth handler：在每次请求前自动注入 access_token"""
 
     def auth_flow(self, request: httpx.Request):
         token = _refresh_private_llm_token()
         request.headers["access_token"] = token
-
-        # 私有 LLM 需要 tool_choice 存在但值为 "required"（而非 "auto"）
-        if request.method == "POST" and request.url.path.endswith("/chat/completions"):
-            try:
-                body = json.loads(request.content)
-                # 某些 API 要求同时传 tool_call_parser
-                if "tool_choice" in body and "tool_call_parser" not in body:
-                    from langchain_core.output_parsers.openai_tools import JsonOutputToolsParser
-                    body["tool_call_parser"] = JsonOutputToolsParser()
-                request.content = json.dumps(body).encode("utf-8")
-                request.headers["Content-Length"] = str(len(request.content))
-            except Exception:
-                pass
 
         yield request
 
